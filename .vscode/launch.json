@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Flet Web: main.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\.venv\\Scripts\\flet.exe",
+            "args": [
+                "run",
+                "--web",
+                "main.py"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ]
+}

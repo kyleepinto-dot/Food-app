@@ -1,0 +1,6 @@
+flet
+flet-camera
+opencv-python
+numpy
+pyzbar
+flet-web
