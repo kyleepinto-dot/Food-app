@@ -2,6 +2,22 @@
 
 Food-app is a simple barcode scanner app built with Flet and OpenCV. It uses your device camera to scan barcodes and display the decoded result.
 
+## Code Tour
+
+Click any link below to jump straight to the matching part of the code in [MAIN.PY](MAIN.PY). This is the fastest way to read the app like a guided tutorial.
+
+- [main() - app setup and UI layout](MAIN.PY#L27)
+- [unsharp_mask() - image sharpening helper](MAIN.PY#L59)
+- [preprocess_for_pyzbar() - barcode image cleanup](MAIN.PY#L73)
+- [process_stream_frame() - live camera barcode scanning](MAIN.PY#L99)
+- [capture_photo_and_scan() - photo snapshot scanning](MAIN.PY#L137)
+- [start_camera() - camera startup flow](MAIN.PY#L186)
+- [stop_camera() - camera shutdown and reset](MAIN.PY#L242)
+
+## Quiz
+
+The line-number quiz has been moved to [BarcodePageQuiz.md](BarcodePageQuiz.md).
+
 ## Features
 
 - Start and stop the camera from the app interface

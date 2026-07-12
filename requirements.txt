@@ -1,6 +1,7 @@
-flet
-flet-camera
-opencv-python
-numpy
-pyzbar
-flet-web
+flet==0.85.3
+flet-cli==0.85.3
+flet-camera==0.85.3
+opencv-python==5.0.0.93
+numpy==2.5.1
+pyzbar==0.1.9
+flet-web==0.85.3
