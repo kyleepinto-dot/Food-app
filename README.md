@@ -20,15 +20,26 @@ It includes:
 - `pages/barcode_page.py`
   - Barcode screen UI components and layout
   - `BarcodeScannerController` for camera lifecycle and barcode decoding
+- `pages/theme.py`
+  - Centralized `ThemeColors` tokens shared across UI pages
+- `MainPageQuiz.cmd`
+  - Multiple-choice learning quiz focused on `MAIN.PY`
+- `pages/HomePageQuiz.md`
+  - Multiple-choice learning quiz focused on `home_page.py`
+- `pages/BarcodePageQuiz.md`
+  - Multiple-choice learning quiz focused on `barcode_page.py`
 
 ## Code Tour
 
 - [App bootstrap and flow](MAIN.PY)
 - [Home page UI](pages/home_page.py)
 - [Barcode page UI](pages/barcode_page.py)
+- [Theme color tokens](pages/theme.py)
 
 ## Quiz
 
+- [Main page quiz](MainPageQuiz.cmd)
+- [Home page quiz](pages/HomePageQuiz.md)
 - [Barcode page quiz](pages/BarcodePageQuiz.md)
 
 ## Features
@@ -42,6 +53,9 @@ It includes:
   - Stop Camera
   - Take Photo (when streaming fallback applies)
   - Live barcode decoding result display
+- Centralized theme tokens:
+  - Shared color constants in `pages/theme.py`
+  - Consistent styling across app screens
 
 ## Platform Notes
 
