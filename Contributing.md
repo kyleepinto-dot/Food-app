@@ -188,3 +188,24 @@ flet run --web MAIN.PY
 - Update docs when behavior or setup changes.
 - If you add dependencies, update `requirements.txt`.
 - Confirm the app runs before opening or merging a PR.
+
+## Flet App Development Best Practices
+
+- **Organize code by feature**: separate `views`, `services`, `models`, `components`, and `assets`
+- **Create reusable UI components**: avoid repeating cards, buttons, chips, and layout code
+- **Keep UI and logic separate**: views display data; services handle APIs, storage, and business logic
+- **Use routing for multiple screens**: navigate with routes instead of hiding/showing controls
+- **Centralize theme colors and styles**: keep branding consistent and easy to update
+- **Minimize `page.update()` calls**: update multiple controls first, then refresh once
+- **Use async for slow tasks**: API calls, LLM requests, barcode lookup, and database access
+- **Use data models**: define clear objects like `FoodResult`, `UserProfile`, or `ScanHistory`
+- **Manage app state separately**: don’t store important data only inside UI controls
+- **Design mobile-first**: test layouts on phone-sized screens early and often
+- **Use Material Design components**: cards, navigation bars, snackbars, dialogs, and bottom sheets
+- **Protect secrets**: store API keys in environment variables, not directly in code
+- **Use logging instead of print**: easier debugging as the app grows
+- **Keep prompts separate**: store LLM prompts in dedicated files for easier updates
+
+### Golden Rule
+
+**Keep screens focused on UI. Put API calls, GPT prompts, storage, and business rules in services.**
