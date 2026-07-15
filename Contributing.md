@@ -84,6 +84,10 @@ Create a PR from your active dev branch into `main`:
 - `kylee-dev` -> `main`, or
 - `yaashvi-dev` -> `main`
 
+https://github.com/kyleepinto-dot/Food-app/compare/main...kylee-dev
+
+https://github.com/kyleepinto-dot/Food-app/compare/main...yaashvi-dev
+
 In the PR description, include:
 - What changed
 - Why it changed
