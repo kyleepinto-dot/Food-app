@@ -1,12 +1,12 @@
 # Barcode Page Quiz
 
-Use [MAIN.PY](MAIN.PY) and answer each question with the correct multiple-choice letter.
+Use [barcode_page.py](barcode_page.py) and answer each question with the correct multiple-choice letter.
 
 After each question there is a blank space for your response.
 
 ## Multiple Choice Questions
 
-1. What does `page.title = "Barcode Scanner"` do?
+1. What does `page.title = "PantryIQ Connect"` do?
 
 A. It sets the text shown in the window title bar.
 
@@ -20,7 +20,7 @@ Your answer:a
 
 
 
-2. What does `status_text = ft.Text(value="Camera ready", size=16)` create?
+2. What does `status_text = ft.Text(value="Camera ready", size=15, color="#303030")` create?
 
 A. A text label that shows the current camera status.
 
@@ -76,7 +76,7 @@ Your answer:a
 
 
 
-6. What does `on_click=lambda e: page.run_task(capture_photo_and_scan, e)` do?
+6. What does `on_take_photo=lambda e: page.run_task(scanner_controller.capture_photo_and_scan, e)` do?
 
 A. It runs the photo capture function when the button is clicked.
 
@@ -342,7 +342,7 @@ Your answer:a
 
 
 
-25. What does `page.on_close = lambda: stop_camera()` help the app do?
+25. What does `page.on_close = lambda _: scanner_controller.stop_camera()` help the app do?
 
 A. Take a screenshot.
 
@@ -395,35 +395,3 @@ C. Because the barcode is already decoded.
 D. Because the camera preview is hidden.
 
 Your answer:a
-
-
-
-29. What is the purpose of `status_text.value = "Scanning..."` in `start_camera()`?
-
-A. It closes the camera.
-
-B. It turns the image grayscale.
-
-C. It saves the result.
-
-D. It tells the user the camera is actively scanning.
-
-Your answer:d
-
-
-
-30. What does `page.add(...)` do in the app?
-
-A. It scans the barcode.
-
-B. It places the visible controls on the page.
-
-C. It flips the camera image.
-
-D. It stops the app.
-
-Your answer:b
-
-
-
-
