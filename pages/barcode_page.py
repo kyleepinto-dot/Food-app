@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 from pyzbar.pyzbar import decode
 
+from pages.theme import ThemeColors
+
 
 class BarcodeScannerController:
     """Owns camera lifecycle and barcode decoding state for the scan page."""
@@ -18,7 +20,8 @@ class BarcodeScannerController:
         self.capture_button = None
 
     def bind_controls(self, controls: dict):
-        # Called after scan UI is built so handlers can update controls.
+        # Called after scan UI is built so async handlers can update the
+        # visible status/result text and interact with camera/capture controls.
         self.camera = controls["camera"]
         self.status_text = controls["status_text"]
         self.result_text = controls["result_text"]
@@ -27,14 +30,19 @@ class BarcodeScannerController:
         self.streaming_supported = False
 
     def camera_supported_on_platform(self) -> bool:
+        # In browser builds, the camera widget can be used directly.
         if bool(getattr(self.page, "web", False)):
             return True
 
+        # For native runtime we intentionally target mobile platforms
+        # (Android/iOS) where Flet camera integration is expected to work.
         platform_name = str(self.page.platform).lower()
         return "android" in platform_name or "ios" in platform_name
 
     @staticmethod
     def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.5, threshold=0):
+        # Sharpen edges before barcode decoding so narrow bars are easier to
+        # separate from background noise.
         blurred = cv2.GaussianBlur(image, kernel_size, sigma)
         sharpened = float(amount + 1) * image - float(amount) * blurred
         sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
@@ -44,9 +52,17 @@ class BarcodeScannerController:
         return sharpened
 
     async def preprocess_for_pyzbar(self, img):
+        # Convert to grayscale to reduce dimensionality and stabilize decode.
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Bilateral filter smooths noise while preserving barcode edges.
         gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+
+        # Edge enhancement improves weak or slightly blurred captures.
         gray = self.unsharp_mask(gray)
+
+        # Adaptive thresholding handles mixed lighting conditions by computing
+        # local thresholds instead of using one global threshold.
         gray = cv2.adaptiveThreshold(
             gray,
             255,
@@ -56,6 +72,8 @@ class BarcodeScannerController:
             3,
         )
 
+        # Add white border so codes near image edges still have clean margins
+        # for pyzbar's detector window.
         padding = 20
         gray = cv2.copyMakeBorder(
             gray,
@@ -69,19 +87,23 @@ class BarcodeScannerController:
         return gray
 
     async def process_stream_frame(self, e):
+        # Called for each streaming frame when live image stream is active.
         image_bytes = e.bytes
         if not image_bytes:
             return
 
         try:
+            # Convert raw bytes into an OpenCV BGR frame.
             nparr = np.frombuffer(image_bytes, np.uint8)
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         except Exception:
+            # Ignore malformed frames and keep the stream alive.
             return
 
         if frame is None:
             return
 
+        # Mirror frame to match what users see in most front-facing previews.
         frame = cv2.flip(frame, 1)
         gray = await self.preprocess_for_pyzbar(frame)
         barcodes = decode(gray)
@@ -98,6 +120,7 @@ class BarcodeScannerController:
         self.page.update()
 
     async def capture_photo_and_scan(self, e):
+        # Photo mode is used when live stream decoding is unavailable.
         if not self.running:
             if self.status_text is not None:
                 self.status_text.value = "Camera not running"
@@ -116,6 +139,8 @@ class BarcodeScannerController:
             return
 
         try:
+            # Capture one still image, then run the same decode pipeline as
+            # the streaming path.
             image_bytes = await self.camera.take_picture()
             if not image_bytes:
                 raise RuntimeError("No image was captured")
@@ -138,11 +163,14 @@ class BarcodeScannerController:
             self.status_text.value = "Photo captured"
             self.page.update()
         except Exception as exc:
+            # Keep errors user-friendly while still surfacing the underlying
+            # exception in status for troubleshooting.
             self.status_text.value = f"Photo error: {exc}"
             self.result_text.value = "Could not read the captured photo"
             self.page.update()
 
     async def start_camera(self, e):
+        # Guard against duplicate starts from repeated button presses.
         if self.running:
             return
 
@@ -156,6 +184,7 @@ class BarcodeScannerController:
             return
 
         try:
+            # Discover cameras and initialize the first available device.
             cameras = await self.camera.get_available_cameras()
             if not cameras:
                 raise RuntimeError("No camera devices were found")
@@ -166,6 +195,7 @@ class BarcodeScannerController:
             self.streaming_supported = supports_streaming
 
             if supports_streaming:
+                # Best UX: continuous live decoding from incoming frames.
                 self.camera.on_stream_image = self.process_stream_frame
                 await self.camera.start_image_stream()
                 self.running = True
@@ -176,6 +206,7 @@ class BarcodeScannerController:
                 if self.result_text is not None:
                     self.result_text.value = "Live barcode scanning is active"
             else:
+                # Fallback mode: allow manual still-photo capture for decode.
                 self.running = True
                 if self.capture_button is not None:
                     self.capture_button.disabled = False
@@ -188,6 +219,8 @@ class BarcodeScannerController:
 
             self.page.update()
         except Exception as exc:
+            # Distinguish browser permission/network constraints from native
+            # camera errors for clearer user guidance.
             self.running = False
             if self.status_text is not None:
                 if bool(getattr(self.page, "web", False)):
@@ -203,10 +236,13 @@ class BarcodeScannerController:
             self.page.update()
 
     def stop_camera(self):
+        # Reset state first so UI and handlers treat camera as inactive.
         self.running = False
 
         if self.camera is not None:
             try:
+                # Stop stream when active; each call is protected so one
+                # failure does not block remaining cleanup work.
                 if self.streaming_supported:
                     self.page.run_task(self.camera.stop_image_stream)
             except Exception:
@@ -218,6 +254,7 @@ class BarcodeScannerController:
                 pass
 
             try:
+                # Remove selected camera description to release device binding.
                 self.page.run_task(self.camera.set_description, None)
             except Exception:
                 pass
@@ -240,20 +277,22 @@ def build_scan_shell(
     on_stop_camera,
     on_take_photo,
 ) -> dict:
-    # Build scanner page UI and return both the container and key controls.
-    # MAIN.PY stores these controls to update status/result from async handlers.
-    status_text = ft.Text(value="Camera ready", size=15, color="#303030")
+    # Build the complete scanner shell and return both the root container and
+    # individual controls needed by asynchronous camera handlers in MAIN.PY.
+    status_text = ft.Text(value="Camera ready", size=15, color=ThemeColors.TEXT_TERTIARY)
     result_text = ft.Text(
         value="No barcode scanned yet",
         size=17,
         weight=ft.FontWeight.BOLD,
-        color="#111111",
+        color=ThemeColors.TEXT_PRIMARY,
     )
 
     camera = fc.Camera(preview_enabled=True, expand=True) if camera_is_supported else None
 
     if camera_is_supported:
-        # Full scanning controls for supported targets (web, Android, iOS).
+        # Full scanner controls for supported targets (web, Android, iOS).
+        # Capture button starts disabled and is enabled only in photo-fallback
+        # mode where streaming is not supported.
         capture_button = ft.Button(
             "Take Photo",
             disabled=True,
@@ -263,7 +302,7 @@ def build_scan_shell(
             ft.Button(
                 "Start Camera",
                 on_click=on_start_camera,
-                style=ft.ButtonStyle(bgcolor="#1AA87C", color="#FFFFFF"),
+                style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color=ThemeColors.BRAND_ON_PRIMARY),
             ),
             ft.Button(
                 "Stop Camera",
@@ -276,11 +315,12 @@ def build_scan_shell(
             expand=True,
             height=metrics["camera_height"],
             border_radius=10,
-            bgcolor="#111111",
+            bgcolor=ThemeColors.TEXT_PRIMARY,
             content=camera,
         )
     else:
-        # Informational fallback for runtimes where camera preview is unavailable.
+        # Informational fallback for runtimes where camera preview is
+        # unsupported, while keeping navigation available.
         capture_button = ft.Button("Take Photo", disabled=True)
         status_text.value = "Camera preview is unavailable on this platform"
         result_text.value = "This app targets Web, Android, and iOS"
@@ -295,11 +335,11 @@ def build_scan_shell(
             expand=True,
             height=metrics["camera_height"],
             border_radius=10,
-            bgcolor="#F2F4F5",
+            bgcolor=ThemeColors.PREVIEW_FALLBACK_BACKGROUND,
             alignment=ft.Alignment(0, 0),
             content=ft.Text(
                 "Camera preview is supported on Web, Android, and iOS.",
-                color="#333333",
+                color=ThemeColors.TEXT_TERTIARY,
                 size=16,
                 text_align=ft.TextAlign.CENTER,
             ),
@@ -308,17 +348,18 @@ def build_scan_shell(
     container = ft.Container(
         width=metrics["shell_width"],
         height=metrics["shell_height"],
-        bgcolor="#FFFFFF",
+        bgcolor=ThemeColors.SHELL_BACKGROUND,
         border_radius=34,
         padding=ft.Padding(left=16, top=16, right=16, bottom=16),
         shadow=ft.BoxShadow(
             spread_radius=1,
             blur_radius=30,
-            color="#22000000",
+            color=ThemeColors.SHELL_SHADOW,
             offset=ft.Offset(0, 8),
         ),
         content=ft.Column(
-            # Page structure: top bar, action row, status output, preview area.
+            # Page layout order: top navigation, action controls, status lines,
+            # then preview area that hosts camera or fallback message.
             spacing=12,
             controls=[
                 ft.Row(
@@ -332,7 +373,7 @@ def build_scan_shell(
                             "Barcode Scan",
                             size=28 if metrics["is_desktop"] else 24,
                             weight=ft.FontWeight.BOLD,
-                            color="#111111",
+                            color=ThemeColors.TEXT_PRIMARY,
                         ),
                         ft.Container(width=40),
                     ],
@@ -349,7 +390,8 @@ def build_scan_shell(
     )
 
     return {
-        # Return the control bundle so main logic can manage camera state.
+        # Control bundle consumed by BarcodeScannerController for lifecycle,
+        # decode updates, and mode-specific button enable/disable behavior.
         "container": container,
         "camera": camera,
         "status_text": status_text,
