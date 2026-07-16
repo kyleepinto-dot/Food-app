@@ -16,7 +16,7 @@ def build_stat_card(title: str, line_one: str, line_two: str) -> ft.Container:
     # `expand=True` lets two cards split available row space evenly.
     return ft.Container(
         expand=True,
-        bgcolor=ThemeColors.CARD_BACKGROUND,
+        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
         border_radius=12,
         padding=14,
         content=ft.Column(
@@ -92,7 +92,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
                                 "PantryIQ Connect",
                                 size=metrics["title_size"],
                                 weight=ft.FontWeight.BOLD,
-                                color=ThemeColors.TEXT_PRIMARY,
+                                color=ThemeColors.GREEN_TEXT,
                             ),
                             ft.Text(
                                 "Scan Food, Understand Freshness,\n"
@@ -125,8 +125,8 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
             height=54,
             on_click=on_scan_click,
             style=ft.ButtonStyle(
-                bgcolor=ThemeColors.BRAND_PRIMARY,
-                color=ThemeColors.BRAND_ON_PRIMARY,
+                bgcolor=ThemeColors.ACCENT_YELLOW,
+                color=ThemeColors.TEXT_PRIMARY,
                 shape=ft.RoundedRectangleBorder(radius=27),
                 text_style=ft.TextStyle(size=metrics["button_text_size"], weight=ft.FontWeight.BOLD),
             ),
@@ -138,7 +138,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
             width=None,
             padding=16,
             border_radius=14,
-            bgcolor=ThemeColors.TRACKER_BACKGROUND,
+            bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
             content=ft.Column(
                 spacing=10,
                 controls=[
@@ -156,7 +156,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
                     ),
                     ft.ProgressBar(
                         value=0.64,
-                        color=ThemeColors.BRAND_PRIMARY,
+                        color=ThemeColors.ACCENT_YELLOW,
                         bgcolor=ThemeColors.PROGRESS_TRACK,
                         bar_height=10,
                         border_radius=10,
@@ -217,7 +217,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
     return ft.Container(
         width=metrics["shell_width"],
         height=metrics["shell_height"],
-        bgcolor=ThemeColors.SHELL_BACKGROUND,
+        bgcolor=ThemeColors.GREEN_SURFACE,
         border_radius=34,
         padding=ft.Padding(left=content_padding, top=22, right=content_padding, bottom=12),
         shadow=ft.BoxShadow(
