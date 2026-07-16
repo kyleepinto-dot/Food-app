@@ -15,6 +15,17 @@ class ThemeColors:
     BRAND_PRIMARY = "#1AA87C"
     BRAND_ON_PRIMARY = "#FFFFFF"
 
+    # Softer yellow accent family shared across pages.
+    # These values intentionally avoid neon tones to keep contrast comfortable.
+    ACCENT_YELLOW = "#E7C85A"
+    ACCENT_YELLOW_SOFT = "#F4E8BB"
+    ACCENT_YELLOW_SUBTLE = "#FBF5DF"
+
+    # Green-forward surfaces for food facts pages.
+    GREEN_SURFACE = "#E8F4EC"
+    GREEN_SURFACE_SOFT = "#D9EEDD"
+    GREEN_TEXT = "#1F5A36"
+
     # Text colors by hierarchy.
     # PRIMARY: main content, SECONDARY: supporting copy,
     # TERTIARY/INACTIVE: helper text and non-selected nav items.
@@ -24,9 +35,9 @@ class ThemeColors:
     TEXT_INACTIVE = "#6E6E6E"
 
     # Component surfaces and accents used by cards, tracker, and preview fallback.
-    CARD_BACKGROUND = "#E6EFF3"
-    TRACKER_BACKGROUND = "#E9F8F2"
-    TRACKER_TEXT = "#0D5F47"
-    PROGRESS_TRACK = "#CFEADF"
+    CARD_BACKGROUND = "#FAF1CC"
+    TRACKER_BACKGROUND = "#F7EDC7"
+    TRACKER_TEXT = "#4A3D12"
+    PROGRESS_TRACK = "#EADDA6"
     DIVIDER = "#DFE3E6"
     PREVIEW_FALLBACK_BACKGROUND = "#F2F4F5"

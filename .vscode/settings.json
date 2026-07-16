@@ -1,3 +1,10 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.uvvenv\\Scripts\\python.exe",
+    "python.pythonPath": "${workspaceFolder}\\.uvvenv\\Scripts\\python.exe",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}\\.uvvenv\\Lib\\site-packages",
+        "${workspaceFolder}\\.venv\\Lib\\site-packages"
+    ]
 }
