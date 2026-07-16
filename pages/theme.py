@@ -26,6 +26,12 @@ class ThemeColors:
     GREEN_SURFACE_SOFT = "#D9EEDD"
     GREEN_TEXT = "#1F5A36"
 
+    # Shared geometry tokens for consistent card language across pages.
+    CARD_RADIUS_OUTER = 16
+    CARD_RADIUS_INNER = 14
+    CARD_PADDING = 12
+    SECTION_SPACING = 12
+
     # Text colors by hierarchy.
     # PRIMARY: main content, SECONDARY: supporting copy,
     # TERTIARY/INACTIVE: helper text and non-selected nav items.

@@ -27,6 +27,7 @@ class BarcodeScannerController:
         self.debug_log_field = None
         self.lookup_overlay = None
         self.on_barcode_detected: Callable[[str], Awaitable[bool]] | None = None
+        self.on_product_name_detected: Callable[[str], Awaitable[bool]] | None = None
         self.last_failed_barcode: str | None = None
         self.lookup_in_progress = False
         self.debug_log_lines: list[str] = []
@@ -80,6 +81,10 @@ class BarcodeScannerController:
         # Main application provides this callback to perform product lookup and
         # route to the product details page when a valid food item is found.
         self.on_barcode_detected = handler
+
+    def set_product_name_detected_handler(self, handler: Callable[[str], Awaitable[bool]] | None):
+        # Optional callback for manual text search by product name.
+        self.on_product_name_detected = handler
 
     async def handle_decoded_barcode(self, barcode_value: str):
         self.append_debug("handle_decoded_barcode", f"Received barcode {barcode_value}")
@@ -143,8 +148,8 @@ class BarcodeScannerController:
             self.append_debug("open_food_facts_lookup", "Lookup request finished")
 
     async def search_manual_barcode(self, e):
-        # Manual entry accepts barcode numbers so users can type codes when
-        # camera scan is unavailable or difficult.
+        # Manual entry accepts barcode numbers or product names so users can
+        # continue even when labels are damaged or codes are missing.
         if self.manual_entry_field is None:
             self.append_debug("manual_entry", "Manual entry field is not available")
             return
@@ -153,25 +158,72 @@ class BarcodeScannerController:
         self.append_debug("manual_entry", f"Raw input received: '{raw_input}'")
         if not raw_input:
             if self.status_text is not None:
-                self.status_text.value = "Enter a barcode number"
+                self.status_text.value = "Enter product name or barcode"
             if self.result_text is not None:
-                self.result_text.value = "Type an 8-14 digit barcode and tap Search."
+                self.result_text.value = "Examples: milk, yogurt, rice, 04963406, 012345678905"
             self.page.update()
             return
 
-        # Allow common separators, then validate barcode-style digits.
+        # Allow common separators, then test barcode-style digits first.
         normalized = re.sub(r"[^0-9]", "", raw_input)
         self.append_debug("manual_entry", f"Normalized input: '{normalized}'")
-        if not re.fullmatch(r"\d{8,14}", normalized):
-            self.append_debug("manual_entry", "Input rejected; expected 8-14 digits barcode format")
+
+        if re.fullmatch(r"\d{8,14}", normalized):
+            await self.handle_decoded_barcode(normalized)
+            return
+
+        product_query = raw_input.strip()
+        if len(product_query) < 2:
+            self.append_debug("manual_entry", "Input rejected; product name too short")
             if self.status_text is not None:
-                self.status_text.value = "Invalid barcode format"
+                self.status_text.value = "Enter more details"
             if self.result_text is not None:
-                self.result_text.value = "Manual entry supports barcode numbers only (8-14 digits)."
+                self.result_text.value = "Type at least 2 characters for product name search."
             self.page.update()
             return
 
-        await self.handle_decoded_barcode(normalized)
+        if self.on_product_name_detected is None:
+            self.append_debug("manual_entry", "No product-name lookup callback attached")
+            if self.status_text is not None:
+                self.status_text.value = "Search unavailable"
+            if self.result_text is not None:
+                self.result_text.value = "Product name search is not configured."
+            self.page.update()
+            return
+
+        if self.lookup_in_progress:
+            self.append_debug("manual_entry", "Lookup already in progress; skipping duplicate request")
+            return
+
+        self.lookup_in_progress = True
+        if self.lookup_overlay is not None:
+            self.lookup_overlay.visible = True
+        if self.status_text is not None:
+            self.status_text.value = "Searching by product name..."
+        if self.result_text is not None:
+            self.result_text.value = f"Query: {product_query}"
+        self.page.update()
+
+        try:
+            is_food = await self.on_product_name_detected(product_query)
+            if not is_food:
+                if self.status_text is not None:
+                    self.status_text.value = "No matching food found"
+                if self.result_text is not None:
+                    self.result_text.value = "Try a more specific product name or enter barcode."
+                self.page.update()
+        except Exception as exc:
+            self.append_debug("manual_name_lookup_error", f"{type(exc).__name__}: {exc}")
+            if self.status_text is not None:
+                self.status_text.value = "Lookup error"
+            if self.result_text is not None:
+                self.result_text.value = f"Could not search product name ({exc})."
+            self.page.update()
+        finally:
+            self.lookup_in_progress = False
+            if self.lookup_overlay is not None and getattr(self.lookup_overlay, "page", None) is not None:
+                self.lookup_overlay.visible = False
+                self.page.update()
 
     def camera_supported_on_platform(self) -> bool:
         # In browser builds, the camera widget can be used directly.
@@ -597,68 +649,128 @@ def build_scan_shell(
 
     manual_entry_field = ft.TextField(
         expand=True,
-        hint_text="e.g., 04963406, 012345678905",
+        hint_text="e.g., Greek yogurt, Basmati rice, 04963406",
         dense=True,
-        prefix_icon=ft.Icons.QR_CODE,
+        prefix_icon=ft.Icons.SEARCH,
         border_radius=14,
         border_color="#CFD5DF",
         bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
         color="#152238",
     )
 
-    manual_entry_card = ft.Container(
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-        border_radius=18,
-        padding=16,
-        content=ft.Column(
+    manual_header: ft.Control
+    if metrics["is_desktop"] or metrics["is_tablet"]:
+        manual_header = ft.Row(
             spacing=12,
             controls=[
-                ft.Row(
-                    spacing=12,
+                ft.Container(
+                    width=58,
+                    height=58,
+                    border_radius=29,
+                    bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Text("🥗", size=30),
+                ),
+                ft.Column(
+                    spacing=2,
                     controls=[
-                        ft.Container(
-                            width=58,
-                            height=58,
-                            border_radius=29,
-                            bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
-                            alignment=ft.Alignment(0, 0),
-                            content=ft.Text("🥗", size=30),
+                        ft.Text(
+                            "Manually Enter Product Name or Barcode",
+                            size=24 if metrics["is_desktop"] else 18,
+                            weight=ft.FontWeight.BOLD,
+                            color="#0A1A12",
                         ),
-                        ft.Column(
-                            spacing=2,
-                            controls=[
-                                ft.Text(
-                                    "Manually Enter Product Name",
-                                    size=24 if metrics["is_desktop"] else 18,
-                                    weight=ft.FontWeight.BOLD,
-                                    color="#0A1A12",
-                                ),
-                                ft.Text(
-                                    "Don't have a barcode? Type the product name to continue.",
-                                    size=14,
-                                    color="#2E3747",
-                                ),
-                            ],
+                        ft.Text(
+                            "Type product name or barcode to continue.",
+                            size=14,
+                            color="#2E3747",
                         ),
                     ],
                 ),
-                ft.Row(
-                    spacing=10,
-                    controls=cast(
-                        list[ft.Control],
-                        [
-                            manual_entry_field,
-                            ft.Button(
-                                content=ft.Text("Search"),
-                                on_click=on_manual_search,
-                                style=ft.ButtonStyle(
-                                    bgcolor=ThemeColors.BRAND_PRIMARY,
-                                    color=ThemeColors.BRAND_ON_PRIMARY,
-                                    shape=ft.RoundedRectangleBorder(radius=14),
-                                ),
-                            ),
-                        ],
+            ],
+        )
+    else:
+        manual_header = ft.Column(
+            spacing=8,
+            controls=[
+                ft.Container(
+                    width=52,
+                    height=52,
+                    border_radius=26,
+                    bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Text("🥗", size=28),
+                ),
+                ft.Text(
+                    "Manually Enter Product Name or Barcode",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    color="#0A1A12",
+                ),
+                ft.Text(
+                    "Type product name or barcode to continue.",
+                    size=14,
+                    color="#2E3747",
+                ),
+            ],
+        )
+
+    manual_search_controls: ft.Control
+    if metrics["is_desktop"] or metrics["is_tablet"]:
+        manual_search_controls = ft.Row(
+            spacing=10,
+            controls=cast(
+                list[ft.Control],
+                [
+                    manual_entry_field,
+                    ft.Button(
+                        content=ft.Text("Search"),
+                        on_click=on_manual_search,
+                        style=ft.ButtonStyle(
+                            bgcolor=ThemeColors.BRAND_PRIMARY,
+                            color=ThemeColors.BRAND_ON_PRIMARY,
+                            shape=ft.RoundedRectangleBorder(radius=14),
+                        ),
                     ),
+                ],
+            ),
+        )
+    else:
+        manual_search_controls = ft.Column(
+            spacing=10,
+            controls=cast(
+                list[ft.Control],
+                [
+                    manual_entry_field,
+                    ft.Container(
+                        alignment=ft.Alignment(1, 0),
+                        content=ft.Button(
+                            content=ft.Text("Search"),
+                            on_click=on_manual_search,
+                            style=ft.ButtonStyle(
+                                bgcolor=ThemeColors.BRAND_PRIMARY,
+                                color=ThemeColors.BRAND_ON_PRIMARY,
+                                shape=ft.RoundedRectangleBorder(radius=14),
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        )
+
+    manual_entry_card = ft.Container(
+        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+        border_radius=ThemeColors.CARD_RADIUS_OUTER,
+        padding=ThemeColors.CARD_PADDING,
+        content=ft.Column(
+            spacing=ThemeColors.SECTION_SPACING,
+            controls=[
+                manual_header,
+                manual_search_controls,
+                ft.Text(
+                    "Examples: Product names -> milk, greek yogurt, brown rice | Barcodes -> 04963406, 012345678905",
+                    size=12,
+                    color=ThemeColors.TEXT_SECONDARY,
                 ),
             ],
         ),
@@ -666,10 +778,12 @@ def build_scan_shell(
 
     where_card = ft.Container(
         bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-        border_radius=16,
-        padding=16,
+        border_radius=ThemeColors.CARD_RADIUS_OUTER,
+        padding=ThemeColors.CARD_PADDING,
         content=ft.Row(
+            wrap=True,
             spacing=12,
+            run_spacing=12,
             controls=[
                 ft.Container(
                     width=50,
@@ -691,15 +805,19 @@ def build_scan_shell(
                         ),
                     ],
                 ),
-                ft.Text("🛍️", size=36),
+                ft.Container(
+                    width=42,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Text("🛍️", size=36),
+                ),
             ],
         ),
     )
 
     freshness_card = ft.Container(
         bgcolor="#E8F5E5",
-        border_radius=16,
-        padding=14,
+        border_radius=ThemeColors.CARD_RADIUS_OUTER,
+        padding=ThemeColors.CARD_PADDING,
         content=ft.Row(
             spacing=12,
             controls=[
@@ -751,7 +869,7 @@ def build_scan_shell(
             on_tap=on_recent_product_click,
             content=ft.Container(
                 bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-                border_radius=14,
+                border_radius=ThemeColors.CARD_RADIUS_INNER,
                 padding=12,
                 content=ft.Row(
                     spacing=12,
@@ -795,8 +913,8 @@ def build_scan_shell(
 
     recent_scanned_section = ft.Container(
         bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-        border_radius=16,
-        padding=12,
+        border_radius=ThemeColors.CARD_RADIUS_OUTER,
+        padding=ThemeColors.CARD_PADDING,
         content=ft.Column(
             spacing=8,
             controls=[
@@ -923,7 +1041,7 @@ def build_scan_shell(
         content=ft.Column(
             # Page layout order: top navigation, action controls, status lines,
             # then preview area that hosts camera or fallback message.
-            spacing=12,
+            spacing=ThemeColors.SECTION_SPACING,
             scroll=ft.ScrollMode.AUTO,
             controls=page_controls,
         ),

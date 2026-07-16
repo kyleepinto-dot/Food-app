@@ -3,7 +3,8 @@ import asyncio
 
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
 from pages.home_page import build_home_shell
-from pages.open_food_facts import fetch_food_product
+from pages.ai_image_service import build_ai_food_image_url
+from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
 from pages.product_info_page import build_product_info_shell
 from pages.theme import ThemeColors
 
@@ -155,6 +156,13 @@ def main(page: ft.Page):
             scanner_controller.append_debug("open_food_facts_lookup", "No food product returned from service")
             return False
 
+        # Use product name from Open Food Facts as the AI prompt subject.
+        # Barcode-derived seed keeps generated images stable for each product.
+        food_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
+        ai_image_url = build_ai_food_image_url(food_name=food_name, barcode=barcode)
+        if isinstance(ai_image_url, str) and ai_image_url:
+            product["ai_image_url"] = ai_image_url
+
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view")
             scanner_controller.stop_camera()
@@ -173,6 +181,40 @@ def main(page: ft.Page):
                 scanner_controller.status_text.value = "Could not open product details"
             if scanner_controller.result_text is not None:
                 scanner_controller.result_text.value = f"Please scan again ({exc})"
+            page.update()
+            return False
+
+    async def on_product_name_detected(product_name_query: str) -> bool:
+        # Search Open Food Facts by typed product name when barcode is unknown.
+        scanner_controller.append_debug("open_food_facts_name_lookup", f"Searching product for '{product_name_query}'")
+        product = await asyncio.to_thread(fetch_food_product_by_name, product_name_query)
+        if product is None:
+            scanner_controller.append_debug("open_food_facts_name_lookup", "No matching food product returned")
+            return False
+
+        code_from_match = str(product.get("code") or "").strip()
+        prompt_name = str(product.get("product_name") or product.get("generic_name") or product_name_query).strip()
+        ai_image_url = build_ai_food_image_url(food_name=prompt_name, barcode=code_from_match)
+        if isinstance(ai_image_url, str) and ai_image_url:
+            product["ai_image_url"] = ai_image_url
+
+        try:
+            scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")
+            scanner_controller.stop_camera()
+            view_state["product"] = product
+            view_state["recent_product"] = product
+            view_state["current"] = "product"
+            render_current_view()
+            scanner_controller.append_debug("navigation", "Product view rendered successfully (manual name)")
+            return True
+        except Exception as exc:
+            scanner_controller.append_debug("navigation_error", f"{type(exc).__name__}: {exc}")
+            view_state["current"] = "scan"
+            render_current_view()
+            if scanner_controller.status_text is not None:
+                scanner_controller.status_text.value = "Could not open product details"
+            if scanner_controller.result_text is not None:
+                scanner_controller.result_text.value = f"Please try another product name ({exc})"
             page.update()
             return False
 
@@ -205,6 +247,7 @@ def main(page: ft.Page):
 
         scanner_controller.bind_controls(controls)
         scanner_controller.set_barcode_detected_handler(on_barcode_detected)
+        scanner_controller.set_product_name_detected_handler(on_product_name_detected)
 
         return controls["container"]
 
