@@ -3,7 +3,7 @@ import flet as ft
 from pages.theme import ThemeColors
 
 
-def build_stat_card(title: str, line_one: str, line_two: str) -> ft.Container:
+def build_stat_card(title: str, line_one: str, line_two: str, expand: bool = True) -> ft.Container:
     """Build one metric tile used in the monthly summary row.
 
     Args:
@@ -15,10 +15,10 @@ def build_stat_card(title: str, line_one: str, line_two: str) -> ft.Container:
     # Shared card used for monthly impact metrics.
     # `expand=True` lets two cards split available row space evenly.
     return ft.Container(
-        expand=True,
+        expand=expand,
         bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-        border_radius=12,
-        padding=14,
+        border_radius=ThemeColors.CARD_RADIUS_INNER,
+        padding=ThemeColors.CARD_PADDING,
         content=ft.Column(
             spacing=6,
             controls=[
@@ -73,6 +73,44 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
         build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry"),
         build_nav_item(ft.Icons.PERSON_OUTLINE, "Me"),
     ]
+
+    monthly_stat_cards: ft.Control
+    if metrics["is_desktop"] or metrics["is_tablet"]:
+        monthly_stat_cards = ft.Row(
+            spacing=10,
+            controls=[
+                build_stat_card(
+                    "No. of Pantry Items Shared/Donated",
+                    "28 items",
+                    "15 lbs",
+                    expand=True,
+                ),
+                build_stat_card(
+                    "No. of Food Composted",
+                    "8 items",
+                    "4 lbs",
+                    expand=True,
+                ),
+            ],
+        )
+    else:
+        monthly_stat_cards = ft.Column(
+            spacing=10,
+            controls=[
+                build_stat_card(
+                    "No. of Pantry Items Shared/Donated",
+                    "28 items",
+                    "15 lbs",
+                    expand=False,
+                ),
+                build_stat_card(
+                    "No. of Food Composted",
+                    "8 items",
+                    "4 lbs",
+                    expand=False,
+                ),
+            ],
+        )
 
     home_controls: list[ft.Control] = [
         ft.Row(
@@ -136,8 +174,8 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
             # Uses progress + explicit ratio text so status is still
             # understandable for users who cannot rely on color alone.
             width=None,
-            padding=16,
-            border_radius=14,
+            padding=ThemeColors.CARD_PADDING,
+            border_radius=ThemeColors.CARD_RADIUS_INNER,
             bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
             content=ft.Column(
                 spacing=10,
@@ -188,22 +226,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
             weight=ft.FontWeight.BOLD,
             color=ThemeColors.TEXT_SECONDARY,
         ),
-        ft.Row(
-            # Two-card snapshot for monthly impact categories.
-            spacing=10,
-            controls=[
-                build_stat_card(
-                    "No. of Pantry Items Shared/Donated",
-                    "28 items",
-                    "15 lbs",
-                ),
-                build_stat_card(
-                    "No. of Food Composted",
-                    "8 items",
-                    "4 lbs",
-                ),
-            ],
-        ),
+        monthly_stat_cards,
         ft.Container(expand=True),
         ft.Divider(height=1, color=ThemeColors.DIVIDER),
         ft.Row(
@@ -228,7 +251,7 @@ def build_home_shell(metrics: dict, on_scan_click) -> ft.Container:
         ),
         content=ft.Column(
             expand=True,
-            spacing=16,
+            spacing=ThemeColors.SECTION_SPACING,
             controls=home_controls,
         ),
     )
