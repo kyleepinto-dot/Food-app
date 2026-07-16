@@ -4,6 +4,23 @@ from typing import cast
 from pages.theme import ThemeColors
 
 
+def build_nav_item(icon: ft.IconData, label: str, selected: bool = False) -> ft.Column:
+    """Return a bottom navigation item with active/inactive visual state."""
+
+    icon_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    text_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
+    nav_item_controls: list[ft.Control] = [
+        ft.Icon(icon=icon, color=icon_color, size=24),
+        ft.Text(label, size=12, color=text_color, weight=weight),
+    ]
+    return ft.Column(
+        spacing=2,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=nav_item_controls,
+    )
+
+
 def _line(label: str, value: str, icon: str | None = None) -> ft.Container:
     icon_control: ft.Control
     if icon:
@@ -241,7 +258,7 @@ def _fattom_grid(metrics: dict) -> ft.Container:
     )
 
 
-def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click) -> ft.Container:
+def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click, on_home_click, on_scan_click) -> ft.Container:
     """Render food facts page using scanned food data on the same app view."""
 
     product_name = str(product.get("product_name") or "Unknown product")
@@ -255,10 +272,10 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
     ai_image_url = product.get("ai_image_url")
     off_image_url = product.get("best_image_url")
 
-    if isinstance(ai_image_url, str) and ai_image_url:
-        image_sources.append({"label": "AI Image", "url": ai_image_url})
     if isinstance(off_image_url, str) and off_image_url:
         image_sources.append({"label": "Open Food Facts", "url": off_image_url})
+    if isinstance(ai_image_url, str) and ai_image_url:
+        image_sources.append({"label": "AI Image", "url": ai_image_url})
 
     header_controls: list[ft.Control] = [
         ft.IconButton(ft.Icons.ARROW_BACK_IOS_NEW, on_click=on_back_to_scan_click, icon_color="#0F0F0F"),
@@ -273,17 +290,24 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
 
     image_control: ft.Control
     if image_sources:
-        active_image = {"index": 0}
-        gallery_image = ft.Image(src=image_sources[0]["url"], height=210)
+        initial_index = 0
+        if bool(product.get("show_ai_first")):
+            for i, source in enumerate(image_sources):
+                if source.get("label") == "AI Image":
+                    initial_index = i
+                    break
+
+        active_image = {"index": initial_index}
+        gallery_image = ft.Image(src=image_sources[initial_index]["url"], height=210)
         source_label = ft.Text(
-            image_sources[0]["label"],
+            image_sources[initial_index]["label"],
             size=11,
             color="#FFFFFF",
             weight=ft.FontWeight.BOLD,
         )
 
         indicator_dots: list[ft.Text] = [
-            ft.Text("●" if i == 0 else "○", color="#FFFFFF", size=12) for i in range(len(image_sources))
+            ft.Text("●" if i == initial_index else "○", color="#FFFFFF", size=12) for i in range(len(image_sources))
         ]
 
         def set_active_image(next_index: int) -> None:
@@ -514,13 +538,26 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
         ),
         # Reserve space so the floating pantry button does not hide final cards
         # while users scroll the product details.
-        ft.Container(height=84),
+        ft.Container(height=160),
+    ]
+
+    bottom_nav_controls: list[ft.Control] = [
+        ft.GestureDetector(
+            on_tap=on_home_click,
+            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Home"),
+        ),
+        ft.GestureDetector(
+            on_tap=on_scan_click,
+            content=build_nav_item(ft.Icons.QR_CODE_SCANNER, "Scan", selected=True),
+        ),
+        build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry"),
+        build_nav_item(ft.Icons.PERSON_OUTLINE, "Me"),
     ]
 
     floating_add_button = ft.Container(
         left=16,
         right=16,
-        bottom=8,
+        bottom=68,
         content=ft.Button(
             content=ft.Text("Add Product To Pantry"),
             on_click=lambda _: None,
@@ -530,6 +567,24 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
                 shape=ft.RoundedRectangleBorder(radius=18),
                 shadow_color="#33000000",
             ),
+        ),
+    )
+
+    bottom_nav_bar = ft.Container(
+        left=0,
+        right=0,
+        bottom=0,
+        bgcolor=ThemeColors.GREEN_SURFACE,
+        padding=ft.Padding(left=16, top=6, right=16, bottom=8),
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                ft.Divider(height=1, color=ThemeColors.DIVIDER),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                    controls=bottom_nav_controls,
+                ),
+            ],
         ),
     )
 
@@ -553,6 +608,7 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
                     controls=content_controls,
                 ),
                 floating_add_button,
+                bottom_nav_bar,
             ],
         ),
     )

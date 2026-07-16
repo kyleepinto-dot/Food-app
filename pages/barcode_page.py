@@ -12,6 +12,23 @@ from pyzbar.pyzbar import decode
 from pages.theme import ThemeColors
 
 
+def build_nav_item(icon: ft.IconData, label: str, selected: bool = False) -> ft.Column:
+    """Return a bottom navigation item with active/inactive visual state."""
+
+    icon_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    text_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
+    nav_item_controls: list[ft.Control] = [
+        ft.Icon(icon=icon, color=icon_color, size=24),
+        ft.Text(label, size=12, color=text_color, weight=weight),
+    ]
+    return ft.Column(
+        spacing=2,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=nav_item_controls,
+    )
+
+
 class BarcodeScannerController:
     """Owns camera lifecycle and barcode decoding state for the scan page."""
 
@@ -502,6 +519,7 @@ def build_scan_shell(
     camera_is_supported: bool,
     recent_product: dict | None,
     on_back_click,
+    on_home_click,
     on_recent_product_click,
     on_start_camera,
     on_stop_camera,
@@ -929,6 +947,16 @@ def build_scan_shell(
         ),
     )
 
+    bottom_nav_controls: list[ft.Control] = [
+        ft.GestureDetector(
+            on_tap=on_home_click,
+            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Home"),
+        ),
+        build_nav_item(ft.Icons.QR_CODE_SCANNER, "Scan", selected=True),
+        build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry"),
+        build_nav_item(ft.Icons.PERSON_OUTLINE, "Me"),
+    ]
+
     page_controls = cast(list[ft.Control], [
         ft.Container(
             bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
@@ -1024,7 +1052,27 @@ def build_scan_shell(
                 ],
             ),
         ),
+        # Reserve space for fixed bottom app bar.
+        ft.Container(height=74),
     ])
+
+    bottom_nav_bar = ft.Container(
+        left=0,
+        right=0,
+        bottom=0,
+        bgcolor=ThemeColors.GREEN_SURFACE,
+        padding=ft.Padding(left=16, top=6, right=16, bottom=8),
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                ft.Divider(height=1, color=ThemeColors.DIVIDER),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                    controls=bottom_nav_controls,
+                ),
+            ],
+        ),
+    )
 
     container = ft.Container(
         width=metrics["shell_width"],
@@ -1038,12 +1086,17 @@ def build_scan_shell(
             color=ThemeColors.SHELL_SHADOW,
             offset=ft.Offset(0, 8),
         ),
-        content=ft.Column(
-            # Page layout order: top navigation, action controls, status lines,
-            # then preview area that hosts camera or fallback message.
-            spacing=ThemeColors.SECTION_SPACING,
-            scroll=ft.ScrollMode.AUTO,
-            controls=page_controls,
+        content=ft.Stack(
+            controls=[
+                ft.Column(
+                    # Page layout order: top navigation, action controls, status lines,
+                    # then preview area that hosts camera or fallback message.
+                    spacing=ThemeColors.SECTION_SPACING,
+                    scroll=ft.ScrollMode.AUTO,
+                    controls=page_controls,
+                ),
+                bottom_nav_bar,
+            ],
         ),
     )
 
