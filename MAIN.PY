@@ -1,5 +1,7 @@
 import flet as ft
 import asyncio
+import urllib.error
+import urllib.request
 
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
 from pages.home_page import build_home_shell
@@ -35,6 +37,52 @@ def main(page: ft.Page):
     # Dict wrapper is used so nested callbacks can mutate active state
     # without introducing nonlocal statements.
     view_state = {"current": "home", "product": None, "recent_product": None}
+
+    def warm_image_url(url: str) -> bool:
+        """Best-effort warm-up so generated image is likely ready by display time."""
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "PantryIQ-Connect/1.0 (github.com/kyleepinto-dot/Food-app)",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:
+                # Read a small chunk to trigger upstream generation without
+                # blocking on full image download.
+                response.read(256)
+            return True
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+            return False
+
+    async def hydrate_ai_image_async(product: dict, barcode_hint: str):
+        """Attach AI image URL after initial product page render.
+
+        This keeps first paint fast with Open Food Facts image while allowing
+        AI image to appear once available.
+        """
+
+        if not isinstance(product, dict):
+            return
+        if product.get("ai_image_url"):
+            return
+
+        food_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
+        ai_image_url = build_ai_food_image_url(food_name=food_name, barcode=barcode_hint)
+        if not isinstance(ai_image_url, str) or not ai_image_url:
+            return
+
+        is_warmed = await asyncio.to_thread(warm_image_url, ai_image_url)
+        if not is_warmed:
+            return
+
+        product["ai_image_url"] = ai_image_url
+        product["show_ai_first"] = True
+
+        # Refresh only when the same product page is currently visible.
+        if view_state.get("current") == "product" and view_state.get("product") is product:
+            render_current_view()
 
     def get_layout_metrics() -> dict:
         """Return responsive measurements consumed by both screen builders.
@@ -156,13 +204,6 @@ def main(page: ft.Page):
             scanner_controller.append_debug("open_food_facts_lookup", "No food product returned from service")
             return False
 
-        # Use product name from Open Food Facts as the AI prompt subject.
-        # Barcode-derived seed keeps generated images stable for each product.
-        food_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
-        ai_image_url = build_ai_food_image_url(food_name=food_name, barcode=barcode)
-        if isinstance(ai_image_url, str) and ai_image_url:
-            product["ai_image_url"] = ai_image_url
-
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view")
             scanner_controller.stop_camera()
@@ -170,6 +211,7 @@ def main(page: ft.Page):
             view_state["recent_product"] = product
             view_state["current"] = "product"
             render_current_view()
+            page.run_task(hydrate_ai_image_async, product, barcode)
             scanner_controller.append_debug("navigation", "Product view rendered successfully")
             return True
         except Exception as exc:
@@ -192,12 +234,6 @@ def main(page: ft.Page):
             scanner_controller.append_debug("open_food_facts_name_lookup", "No matching food product returned")
             return False
 
-        code_from_match = str(product.get("code") or "").strip()
-        prompt_name = str(product.get("product_name") or product.get("generic_name") or product_name_query).strip()
-        ai_image_url = build_ai_food_image_url(food_name=prompt_name, barcode=code_from_match)
-        if isinstance(ai_image_url, str) and ai_image_url:
-            product["ai_image_url"] = ai_image_url
-
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")
             scanner_controller.stop_camera()
@@ -205,6 +241,7 @@ def main(page: ft.Page):
             view_state["recent_product"] = product
             view_state["current"] = "product"
             render_current_view()
+            page.run_task(hydrate_ai_image_async, product, str(product.get("code") or ""))
             scanner_controller.append_debug("navigation", "Product view rendered successfully (manual name)")
             return True
         except Exception as exc:
@@ -236,6 +273,7 @@ def main(page: ft.Page):
             camera_is_supported=scanner_controller.camera_supported_on_platform(),
             recent_product=view_state["recent_product"],
             on_back_click=show_home,
+            on_home_click=show_home,
             on_recent_product_click=show_recent_product,
             # Async camera APIs are dispatched via page.run_task() so UI
             # remains responsive while camera operations are in-flight.
@@ -259,6 +297,8 @@ def main(page: ft.Page):
             metrics=metrics,
             product=product,
             on_back_to_scan_click=show_scan,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
         )
 
     # Re-render on resize so responsive metrics are applied immediately.
