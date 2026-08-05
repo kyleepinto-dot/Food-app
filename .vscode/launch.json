@@ -2,15 +2,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "PantryIQ: Run MAIN.PY (.uvvenv)",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}\\MAIN.PY",
-            "python": "${workspaceFolder}\\.uvvenv\\Scripts\\python.exe",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal"
-        },
-        {
             "name": "Flet Web: MAIN.PY",
             "type": "debugpy",
             "request": "launch",
@@ -21,7 +12,22 @@
                 "MAIN.PY"
             ],
             "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "presentation": {
+                "order": 1
+            }
+        },
+        {
+            "name": "PantryIQ: Run MAIN.PY (.uvvenv)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\MAIN.PY",
+            "python": "${workspaceFolder}\\.uvvenv\\Scripts\\python.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "presentation": {
+                "order": 2
+            }
         }
     ]
 }
