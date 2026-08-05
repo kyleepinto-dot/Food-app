@@ -4,6 +4,7 @@ import urllib.error
 import urllib.request
 
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
+from pages.ai_food_profile_service import fetch_ai_food_profile, get_last_ai_food_profile_error
 from pages.home_page import build_home_shell
 from pages.ai_image_service import build_ai_food_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
@@ -79,6 +80,40 @@ def main(page: ft.Page):
 
         product["ai_image_url"] = ai_image_url
         product["show_ai_first"] = True
+
+        # Refresh only when the same product page is currently visible.
+        if view_state.get("current") == "product" and view_state.get("product") is product:
+            render_current_view()
+
+    async def hydrate_ai_food_profile_async(product: dict):
+        """Attach AI-derived risk/shelf/storage profile after initial render."""
+
+        if not isinstance(product, dict):
+            return
+        if isinstance(product.get("ai_food_profile"), dict):
+            return
+
+        product_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
+        categories = str(product.get("categories") or "").strip()
+
+        ai_profile = await asyncio.to_thread(fetch_ai_food_profile, product_name, categories)
+        if not isinstance(ai_profile, dict):
+            product["ai_food_profile_status"] = "failed"
+            reason = get_last_ai_food_profile_error() or "unknown reason"
+            scanner_controller.append_debug("ai_food_profile", f"AI profile generation failed ({reason}); using fallback profile")
+            if view_state.get("current") == "product" and view_state.get("product") is product:
+                render_current_view()
+            return
+
+        product["ai_food_profile"] = ai_profile
+        provider_mode = str(ai_profile.get("_provider") or "remote").lower()
+        if provider_mode == "remote":
+            product["ai_food_profile_status"] = "ready"
+            scanner_controller.append_debug("ai_food_profile", "AI profile generation succeeded")
+        else:
+            product["ai_food_profile_status"] = "ready_local"
+            reason = get_last_ai_food_profile_error() or "remote unavailable"
+            scanner_controller.append_debug("ai_food_profile", f"Remote AI unavailable ({reason}); local smart profile used")
 
         # Refresh only when the same product page is currently visible.
         if view_state.get("current") == "product" and view_state.get("product") is product:
@@ -209,9 +244,11 @@ def main(page: ft.Page):
             scanner_controller.stop_camera()
             view_state["product"] = product
             view_state["recent_product"] = product
+            product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
             page.run_task(hydrate_ai_image_async, product, barcode)
+            page.run_task(hydrate_ai_food_profile_async, product)
             scanner_controller.append_debug("navigation", "Product view rendered successfully")
             return True
         except Exception as exc:
@@ -239,9 +276,11 @@ def main(page: ft.Page):
             scanner_controller.stop_camera()
             view_state["product"] = product
             view_state["recent_product"] = product
+            product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
             page.run_task(hydrate_ai_image_async, product, str(product.get("code") or ""))
+            page.run_task(hydrate_ai_food_profile_async, product)
             scanner_controller.append_debug("navigation", "Product view rendered successfully (manual name)")
             return True
         except Exception as exc:

@@ -4,6 +4,79 @@ from typing import cast
 from pages.theme import ThemeColors
 
 
+def _normalize_fattom_level(value: str, default: str = "Medium") -> str:
+    text = str(value or "").strip().lower()
+    if "high" in text:
+        return "High"
+    if "low" in text:
+        return "Low"
+    if "medium" in text:
+        return "Medium"
+    return default
+
+
+def _derive_default_fattom_from_text(text: str, risk: str) -> dict:
+    if any(word in text for word in ["milk", "yogurt", "cheese", "cream", "dairy", "fish", "chicken", "meat", "beef", "pork", "turkey"]):
+        return {
+            "food": "High",
+            "acidity": "Medium",
+            "time": "High",
+            "temperature": "High",
+            "oxygen": "Medium",
+            "moisture": "High",
+        }
+    if any(word in text for word in ["frozen", "ice cream", "frozen food", "rice", "pasta", "grain", "cereal", "dry"]):
+        return {
+            "food": "Low",
+            "acidity": "Medium",
+            "time": "Low",
+            "temperature": "Medium",
+            "oxygen": "Low",
+            "moisture": "Low",
+        }
+    if "low" in risk.lower():
+        return {
+            "food": "Low",
+            "acidity": "Medium",
+            "time": "Low",
+            "temperature": "Medium",
+            "oxygen": "Low",
+            "moisture": "Low",
+        }
+    return {
+        "food": "Medium",
+        "acidity": "Medium",
+        "time": "Medium",
+        "temperature": "Medium",
+        "oxygen": "Low",
+        "moisture": "Medium",
+    }
+
+
+def _extract_fattom_levels(ai_profile: dict, text: str, risk: str) -> dict:
+    defaults = _derive_default_fattom_from_text(text, risk)
+    payload = ai_profile.get("fattom")
+
+    if isinstance(payload, dict):
+        return {
+            "food": _normalize_fattom_level(str(payload.get("food") or ""), defaults["food"]),
+            "acidity": _normalize_fattom_level(str(payload.get("acidity") or ""), defaults["acidity"]),
+            "time": _normalize_fattom_level(str(payload.get("time") or ""), defaults["time"]),
+            "temperature": _normalize_fattom_level(str(payload.get("temperature") or ""), defaults["temperature"]),
+            "oxygen": _normalize_fattom_level(str(payload.get("oxygen") or ""), defaults["oxygen"]),
+            "moisture": _normalize_fattom_level(str(payload.get("moisture") or ""), defaults["moisture"]),
+        }
+
+    return {
+        "food": _normalize_fattom_level(str(ai_profile.get("fattom_food") or ""), defaults["food"]),
+        "acidity": _normalize_fattom_level(str(ai_profile.get("fattom_acidity") or ""), defaults["acidity"]),
+        "time": _normalize_fattom_level(str(ai_profile.get("fattom_time") or ""), defaults["time"]),
+        "temperature": _normalize_fattom_level(str(ai_profile.get("fattom_temperature") or ""), defaults["temperature"]),
+        "oxygen": _normalize_fattom_level(str(ai_profile.get("fattom_oxygen") or ""), defaults["oxygen"]),
+        "moisture": _normalize_fattom_level(str(ai_profile.get("fattom_moisture") or ""), defaults["moisture"]),
+    }
+
+
 def build_nav_item(icon: ft.IconData, label: str, selected: bool = False) -> ft.Column:
     """Return a bottom navigation item with active/inactive visual state."""
 
@@ -65,6 +138,28 @@ def _derive_food_profile(product: dict) -> dict:
         ]
     )
 
+    ai_profile = product.get("ai_food_profile")
+    if isinstance(ai_profile, dict):
+        risk = str(ai_profile.get("risk") or "").strip()
+        confidence = str(ai_profile.get("confidence") or "").strip()
+        shelf = str(ai_profile.get("shelf_life") or "").strip()
+        storage = str(ai_profile.get("storage") or "").strip()
+        immediate_actions = str(ai_profile.get("immediate_actions") or "").strip()
+        warnings = str(ai_profile.get("warnings") or "").strip()
+
+        if risk and confidence and shelf and storage:
+            fattom = _extract_fattom_levels(ai_profile, text, risk)
+            return {
+                "risk": risk,
+                "confidence": confidence,
+                "shelf_life": shelf,
+                "storage": storage,
+                "immediate_actions": immediate_actions or "Use oldest stock first and follow package instructions.",
+                "warnings": warnings or "Discard if strong odor, mold, or unusual texture appears.",
+                "fattom": fattom,
+                "source": "AI",
+            }
+
     if any(word in text for word in ["milk", "yogurt", "cream", "cheese", "fish", "chicken", "meat"]):
         risk = "High Risk"
         confidence = "High Confidence"
@@ -86,6 +181,10 @@ def _derive_food_profile(product: dict) -> dict:
         "confidence": confidence,
         "shelf_life": shelf,
         "storage": storage,
+        "immediate_actions": "Keep in a cool place and use oldest stock first.",
+        "warnings": "Discard if strong odor, mold, or unusual texture appears.",
+        "fattom": _derive_default_fattom_from_text(text, risk),
+        "source": "Fallback",
     }
 
 
@@ -206,14 +305,14 @@ def _derive_product_handling_tips(product: dict) -> dict:
     }
 
 
-def _fattom_grid(metrics: dict) -> ft.Container:
+def _fattom_grid(metrics: dict, fattom: dict) -> ft.Container:
     cells = [
-        ("Food", "Medium", "🍽️"),
-        ("Acidity", "Medium", "🧪"),
-        ("Time", "Medium", "⏱️"),
-        ("Temperature", "Medium", "🌡️"),
-        ("Oxygen", "Low", "💨"),
-        ("Moisture", "High", "💧"),
+        ("Food", _normalize_fattom_level(str(fattom.get("food") or ""), "Medium"), "🍽️"),
+        ("Acidity", _normalize_fattom_level(str(fattom.get("acidity") or ""), "Medium"), "🧪"),
+        ("Time", _normalize_fattom_level(str(fattom.get("time") or ""), "Medium"), "⏱️"),
+        ("Temperature", _normalize_fattom_level(str(fattom.get("temperature") or ""), "Medium"), "🌡️"),
+        ("Oxygen", _normalize_fattom_level(str(fattom.get("oxygen") or ""), "Low"), "💨"),
+        ("Moisture", _normalize_fattom_level(str(fattom.get("moisture") or ""), "Medium"), "💧"),
     ]
 
     cards_per_row = 3 if metrics["is_desktop"] else 2
@@ -265,6 +364,20 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
     category_text = str(product.get("categories") or "Food item")
     profile = _derive_food_profile(product)
     handling_tips = _derive_product_handling_tips(product)
+    ai_profile_status = str(product.get("ai_food_profile_status") or "").lower()
+
+    if profile.get("source") == "AI":
+        profile_status_text = "Profile source: AI generated"
+        profile_status_color = "#1F5A36"
+    elif ai_profile_status == "ready_local":
+        profile_status_text = "Profile source: Local smart profile (remote AI unavailable)"
+        profile_status_color = "#7A4D1D"
+    elif ai_profile_status == "pending":
+        profile_status_text = "Profile source: AI generating... (temporary fallback shown)"
+        profile_status_color = "#8A6D1D"
+    else:
+        profile_status_text = "Profile source: Fallback heuristic (AI unavailable)"
+        profile_status_color = "#8A3B24"
 
     summary_text = f"{product_name} is categorized as {category_text}. {profile['storage']}"
 
@@ -490,12 +603,13 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
 
     details_controls: list[ft.Control] = [
         ft.Text("Summary", size=13, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
+        ft.Text(profile_status_text, size=12, color=profile_status_color, weight=ft.FontWeight.W_600),
         _line("Summary", summary_text, "🧾"),
         storage_cards,
-        _line("Immediate Actions", "Keep in a cool place and use oldest stock first.", "✅"),
-        _line("Warnings", "Discard if strong odor, mold, or unusual texture appears.", "⚠️"),
+        _line("Immediate Actions", profile["immediate_actions"], "✅"),
+        _line("Warnings", profile["warnings"], "⚠️"),
         ft.Text("FATTOM Dashboard", size=13, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
-        _fattom_grid(metrics),
+        _fattom_grid(metrics, profile.get("fattom") or {}),
         _line("Waste Reduction Tips", handling_tips["waste_tip"], "♻️"),
     ]
 
