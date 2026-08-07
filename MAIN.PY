@@ -6,6 +6,8 @@ import urllib.request
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
 from pages.ai_food_profile_service import fetch_ai_food_profile, get_last_ai_food_profile_error
 from pages.home_page import build_home_shell
+from pages.pantry_page import build_pantry_shell
+from pages.me_page import build_me_shell
 from pages.ai_image_service import build_ai_food_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
 from pages.product_info_page import build_product_info_shell
@@ -22,7 +24,7 @@ def main(page: ft.Page):
     # Global page styling and initial window size.
     # The responsive layout code below still adapts when the window changes.
     page.title = "PantryIQ Connect"
-    page.padding = 20
+    page.padding = 8
     page.bgcolor = ThemeColors.PAGE_BACKGROUND
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
@@ -37,7 +39,32 @@ def main(page: ft.Page):
     # Track which screen should be displayed by render_current_view().
     # Dict wrapper is used so nested callbacks can mutate active state
     # without introducing nonlocal statements.
-    view_state = {"current": "home", "product": None, "recent_product": None}
+    view_state = {"current": "home", "product": None, "recent_products": [], "ai_profile_cache": {}}
+
+    def _ai_profile_cache_key(product_name: str, categories: str) -> str:
+        return f"{product_name.strip().lower()}|{categories.strip().lower()}"
+
+    def _set_profile_from_cache(product: dict, cached_profile: dict) -> None:
+        product["ai_food_profile"] = dict(cached_profile)
+        product["ai_food_profile_cached"] = True
+        provider_mode = str(cached_profile.get("_provider") or "remote").lower()
+        product["ai_food_profile_status"] = "ready_local" if provider_mode == "local" else "ready"
+
+    def _recent_product_key(product: dict) -> str:
+        code = str(product.get("code") or "").strip()
+        if code:
+            return f"code:{code}"
+        name = str(product.get("product_name") or product.get("generic_name") or "unknown").strip().lower()
+        return f"name:{name}"
+
+    def remember_recent_product(product: dict) -> None:
+        if not isinstance(product, dict):
+            return
+
+        existing = list(view_state.get("recent_products") or [])
+        target_key = _recent_product_key(product)
+        deduped = [item for item in existing if isinstance(item, dict) and _recent_product_key(item) != target_key]
+        view_state["recent_products"] = [product] + deduped[:4]
 
     def warm_image_url(url: str) -> bool:
         """Best-effort warm-up so generated image is likely ready by display time."""
@@ -96,8 +123,19 @@ def main(page: ft.Page):
         product_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
         categories = str(product.get("categories") or "").strip()
 
+        cache_key = _ai_profile_cache_key(product_name, categories)
+        profile_cache = view_state.get("ai_profile_cache") or {}
+        cached_profile = profile_cache.get(cache_key)
+        if isinstance(cached_profile, dict):
+            _set_profile_from_cache(product, cached_profile)
+            scanner_controller.append_debug("ai_food_profile", "AI profile cache hit")
+            if view_state.get("current") == "product" and view_state.get("product") is product:
+                render_current_view()
+            return
+
         ai_profile = await asyncio.to_thread(fetch_ai_food_profile, product_name, categories)
         if not isinstance(ai_profile, dict):
+            product["ai_food_profile_cached"] = False
             product["ai_food_profile_status"] = "failed"
             reason = get_last_ai_food_profile_error() or "unknown reason"
             scanner_controller.append_debug("ai_food_profile", f"AI profile generation failed ({reason}); using fallback profile")
@@ -106,6 +144,14 @@ def main(page: ft.Page):
             return
 
         product["ai_food_profile"] = ai_profile
+        product["ai_food_profile_cached"] = False
+        profile_cache[cache_key] = dict(ai_profile)
+        # Bound memory while keeping a useful recent working set.
+        if len(profile_cache) > 120:
+            oldest_key = next(iter(profile_cache), None)
+            if isinstance(oldest_key, str):
+                profile_cache.pop(oldest_key, None)
+        view_state["ai_profile_cache"] = profile_cache
         provider_mode = str(ai_profile.get("_provider") or "remote").lower()
         if provider_mode == "remote":
             product["ai_food_profile_status"] = "ready"
@@ -137,16 +183,16 @@ def main(page: ft.Page):
         is_tablet = 700 <= viewport_w < 1000
 
         if is_desktop:
-            shell_width = min(980, viewport_w - 90)
-            shell_height = min(860, max(700, viewport_h - 60))
+            shell_width = max(980, viewport_w - 16)
+            shell_height = max(700, viewport_h - 16)
             title_size = 52
             subtitle_size = 20
             section_title_size = 44
             button_text_size = 26
             camera_height = max(420, shell_height - 250)
         elif is_tablet:
-            shell_width = min(700, viewport_w - 60)
-            shell_height = min(820, max(680, viewport_h - 50))
+            shell_width = max(680, viewport_w - 20)
+            shell_height = max(680, viewport_h - 20)
             title_size = 44
             subtitle_size = 16
             section_title_size = 40
@@ -201,6 +247,20 @@ def main(page: ft.Page):
                 page.update()
             return
 
+        if view_state["current"] == "pantry":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_pantry_view())
+            page.update()
+            return
+
+        if view_state["current"] == "me":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_me_view())
+            page.update()
+            return
+
         # Leaving scan mode should always stop camera access before replacing
         # controls so hardware and stream resources are released promptly.
         scanner_controller.stop_camera()
@@ -223,13 +283,36 @@ def main(page: ft.Page):
         view_state["current"] = "scan"
         render_current_view()
 
-    def show_recent_product(_=None):
-        # Reopen last scanned food details from the scan page quick-access card.
-        if view_state["recent_product"] is None:
+    def show_pantry(_=None):
+        """Navigate to the pantry screen from button/tap handlers."""
+
+        view_state["current"] = "pantry"
+        render_current_view()
+
+    def show_me(_=None):
+        """Navigate to the profile screen from button/tap handlers."""
+
+        view_state["current"] = "me"
+        render_current_view()
+
+    def show_recent_product(product: dict | None = None):
+        # Reopen a previously scanned food details card from quick access.
+        target_product = product
+        if target_product is None:
+            recent_products = view_state.get("recent_products") or []
+            target_product = recent_products[0] if recent_products else None
+
+        if target_product is None:
             return
-        view_state["product"] = view_state["recent_product"]
+        view_state["product"] = target_product
         view_state["current"] = "product"
         render_current_view()
+
+    def clear_recent_history(_=None):
+        # Clear recent scan shortcuts and refresh scan view if visible.
+        view_state["recent_products"] = []
+        if view_state.get("current") == "scan":
+            render_current_view()
 
     async def on_barcode_detected(barcode: str) -> bool:
         # Query Open Food Facts off-thread so network calls do not block UI.
@@ -243,7 +326,7 @@ def main(page: ft.Page):
             scanner_controller.append_debug("navigation", "Switching from scan view to product view")
             scanner_controller.stop_camera()
             view_state["product"] = product
-            view_state["recent_product"] = product
+            remember_recent_product(product)
             product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
@@ -275,7 +358,7 @@ def main(page: ft.Page):
             scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")
             scanner_controller.stop_camera()
             view_state["product"] = product
-            view_state["recent_product"] = product
+            remember_recent_product(product)
             product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
@@ -299,7 +382,14 @@ def main(page: ft.Page):
 
         # Home screen UI is implemented in pages/home_page.py.
         metrics = get_layout_metrics()
-        return build_home_shell(metrics=metrics, on_scan_click=show_scan)
+        return build_home_shell(
+            metrics=metrics,
+            on_scan_click=show_scan,
+            on_pantry_click=show_pantry,
+            on_me_click=show_me,
+            recent_products=view_state.get("recent_products") or [],
+            on_recent_product_click=show_recent_product,
+        )
 
     def build_scan_view() -> ft.Container:
         """Build the scan shell and wire controller-driven async callbacks."""
@@ -310,10 +400,13 @@ def main(page: ft.Page):
         controls = build_scan_shell(
             metrics=metrics,
             camera_is_supported=scanner_controller.camera_supported_on_platform(),
-            recent_product=view_state["recent_product"],
+            recent_products=view_state.get("recent_products") or [],
             on_back_click=show_home,
             on_home_click=show_home,
+            on_pantry_click=show_pantry,
+            on_me_click=show_me,
             on_recent_product_click=show_recent_product,
+            on_clear_recent_click=clear_recent_history,
             # Async camera APIs are dispatched via page.run_task() so UI
             # remains responsive while camera operations are in-flight.
             on_start_camera=lambda e: page.run_task(scanner_controller.start_camera, e),
@@ -338,6 +431,28 @@ def main(page: ft.Page):
             on_back_to_scan_click=show_scan,
             on_home_click=show_home,
             on_scan_click=show_scan,
+            on_pantry_click=show_pantry,
+            on_me_click=show_me,
+        )
+
+    def build_pantry_view() -> ft.Container:
+        # Pantry screen mirrors the app visual language and bottom navigation.
+        metrics = get_layout_metrics()
+        return build_pantry_shell(
+            metrics=metrics,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_me_click=show_me,
+        )
+
+    def build_me_view() -> ft.Container:
+        # Account/profile screen reuses shared shell styling and nav.
+        metrics = get_layout_metrics()
+        return build_me_shell(
+            metrics=metrics,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_pantry_click=show_pantry,
         )
 
     # Re-render on resize so responsive metrics are applied immediately.
