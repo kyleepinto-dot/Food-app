@@ -12,18 +12,17 @@ from pyzbar.pyzbar import decode
 from pages.theme import ThemeColors
 
 
-def build_nav_item(icon: ft.IconData, label: str, selected: bool = False) -> ft.Column:
+def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compact: bool = False) -> ft.Column:
     """Return a bottom navigation item with active/inactive visual state."""
 
-    icon_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
-    text_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    icon_color = "#2E5D4E" if selected else ThemeColors.TEXT_INACTIVE
+    text_color = "#2E5D4E" if selected else ThemeColors.TEXT_INACTIVE
     weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
-    nav_item_controls: list[ft.Control] = [
-        ft.Icon(icon=icon, color=icon_color, size=24),
-        ft.Text(label, size=12, color=text_color, weight=weight),
-    ]
+    nav_item_controls: list[ft.Control] = [ft.Icon(icon=icon, color=icon_color, size=24)]
+    if not compact:
+        nav_item_controls.append(ft.Text(label, size=12, color=text_color, weight=weight))
     return ft.Column(
-        spacing=2,
+        spacing=2 if not compact else 0,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         controls=nav_item_controls,
     )
@@ -517,10 +516,13 @@ class BarcodeScannerController:
 def build_scan_shell(
     metrics: dict,
     camera_is_supported: bool,
-    recent_product: dict | None,
+    recent_products: list[dict] | None,
     on_back_click,
     on_home_click,
+    on_pantry_click,
+    on_me_click,
     on_recent_product_click,
+    on_clear_recent_click,
     on_start_camera,
     on_stop_camera,
     on_take_photo,
@@ -545,8 +547,8 @@ def build_scan_shell(
             disabled=True,
             on_click=on_take_photo,
             style=ft.ButtonStyle(
-                bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
-                color="#111111",
+                bgcolor="#FFFFFF",
+                color=ThemeColors.TEXT_PRIMARY,
             ),
         )
         action_controls: list[ft.Control] = cast(
@@ -555,7 +557,7 @@ def build_scan_shell(
                 ft.Button(
                     content=ft.Text("Start Camera"),
                     on_click=on_start_camera,
-                    style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color=ThemeColors.BRAND_ON_PRIMARY),
+                    style=ft.ButtonStyle(bgcolor="#2E5D4E", color=ThemeColors.BRAND_ON_PRIMARY),
                 ),
                 ft.Button(
                     content=ft.Text("Stop Camera"),
@@ -578,7 +580,7 @@ def build_scan_shell(
                 ft.Button(
                     content=ft.Text("Back Home"),
                     on_click=on_back_click,
-                    style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color=ThemeColors.BRAND_ON_PRIMARY),
+                    style=ft.ButtonStyle(bgcolor="#2E5D4E", color=ThemeColors.BRAND_ON_PRIMARY),
                 )
             ],
         )
@@ -607,7 +609,7 @@ def build_scan_shell(
                 tight=True,
                 spacing=10,
                 controls=[
-                    ft.ProgressRing(width=18, height=18, stroke_width=3, color=ThemeColors.ACCENT_YELLOW),
+                    ft.ProgressRing(width=18, height=18, stroke_width=3, color=ThemeColors.BRAND_PRIMARY),
                     ft.Text(
                         "Looking up product details...",
                         size=14,
@@ -623,7 +625,7 @@ def build_scan_shell(
         height=350 if metrics["is_desktop"] else 300,
         border_radius=22,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        bgcolor="#DDD1BB",
+        bgcolor="#FFFFFF",
         content=ft.Stack(
             controls=[
                 ft.Container(
@@ -642,18 +644,18 @@ def build_scan_shell(
                     right=0,
                     alignment=ft.Alignment(0, 0),
                     content=ft.Container(
-                        bgcolor=ThemeColors.ACCENT_YELLOW,
+                        bgcolor="#FFFFFF",
                         border_radius=22,
                         padding=ft.Padding(left=14, top=8, right=14, bottom=8),
                         content=ft.Row(
                             tight=True,
                             spacing=8,
                             controls=[
-                                ft.Icon(ft.Icons.CAMERA_ALT_OUTLINED, size=18, color="#111111"),
+                                ft.Icon(ft.Icons.CAMERA_ALT_OUTLINED, size=18, color=ThemeColors.GREEN_TEXT),
                                 ft.Text(
                                     "Point your camera at the product barcode",
                                     size=16 if metrics["is_desktop"] else 14,
-                                    color="#111111",
+                                    color=ThemeColors.TEXT_PRIMARY,
                                     weight=ft.FontWeight.W_600,
                                 ),
                             ],
@@ -670,9 +672,11 @@ def build_scan_shell(
         hint_text="e.g., Greek yogurt, Basmati rice, 04963406",
         dense=True,
         prefix_icon=ft.Icons.SEARCH,
+        on_submit=on_manual_search,
         border_radius=14,
-        border_color="#CFD5DF",
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+        border_color="#D4DCE5",
+        focused_border_color=ThemeColors.BRAND_PRIMARY,
+        bgcolor="#FFFFFF",
         color="#152238",
     )
 
@@ -681,14 +685,6 @@ def build_scan_shell(
         manual_header = ft.Row(
             spacing=12,
             controls=[
-                ft.Container(
-                    width=58,
-                    height=58,
-                    border_radius=29,
-                    bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Text("🥗", size=30),
-                ),
                 ft.Column(
                     spacing=2,
                     controls=[
@@ -711,14 +707,6 @@ def build_scan_shell(
         manual_header = ft.Column(
             spacing=8,
             controls=[
-                ft.Container(
-                    width=52,
-                    height=52,
-                    border_radius=26,
-                    bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Text("🥗", size=28),
-                ),
                 ft.Text(
                     "Manually Enter Product Name or Barcode",
                     size=18,
@@ -745,7 +733,7 @@ def build_scan_shell(
                         content=ft.Text("Search"),
                         on_click=on_manual_search,
                         style=ft.ButtonStyle(
-                            bgcolor=ThemeColors.BRAND_PRIMARY,
+                            bgcolor="#2E5D4E",
                             color=ThemeColors.BRAND_ON_PRIMARY,
                             shape=ft.RoundedRectangleBorder(radius=14),
                         ),
@@ -766,7 +754,7 @@ def build_scan_shell(
                             content=ft.Text("Search"),
                             on_click=on_manual_search,
                             style=ft.ButtonStyle(
-                                bgcolor=ThemeColors.BRAND_PRIMARY,
+                                bgcolor="#2E5D4E",
                                 color=ThemeColors.BRAND_ON_PRIMARY,
                                 shape=ft.RoundedRectangleBorder(radius=14),
                             ),
@@ -777,7 +765,7 @@ def build_scan_shell(
         )
 
     manual_entry_card = ft.Container(
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+        bgcolor="#FFFFFF",
         border_radius=ThemeColors.CARD_RADIUS_OUTER,
         padding=ThemeColors.CARD_PADDING,
         content=ft.Column(
@@ -794,59 +782,13 @@ def build_scan_shell(
         ),
     )
 
-    where_card = ft.Container(
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-        border_radius=ThemeColors.CARD_RADIUS_OUTER,
-        padding=ThemeColors.CARD_PADDING,
-        content=ft.Row(
-            wrap=True,
-            spacing=12,
-            run_spacing=12,
-            controls=[
-                ft.Container(
-                    width=50,
-                    height=50,
-                    border_radius=25,
-                    bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Text("💡", size=28),
-                ),
-                ft.Column(
-                    expand=True,
-                    spacing=2,
-                    controls=[
-                        ft.Text("Where to find the barcode?", size=18, weight=ft.FontWeight.BOLD, color="#102218"),
-                        ft.Text(
-                            "Look for the barcode on the product packaging, usually on the back or side label.",
-                            size=14,
-                            color="#2F384A",
-                        ),
-                    ],
-                ),
-                ft.Container(
-                    width=42,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Text("🛍️", size=36),
-                ),
-            ],
-        ),
-    )
-
     freshness_card = ft.Container(
-        bgcolor="#E8F5E5",
+        bgcolor="#FFFFFF",
         border_radius=ThemeColors.CARD_RADIUS_OUTER,
         padding=ThemeColors.CARD_PADDING,
         content=ft.Row(
             spacing=12,
             controls=[
-                ft.Container(
-                    width=42,
-                    height=42,
-                    border_radius=21,
-                    bgcolor="#D4F0CC",
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Text("🍃", size=24),
-                ),
                 ft.Text(
                     "Adding products helps you track freshness, reduce food waste, and share with others!",
                     expand=True,
@@ -858,68 +800,77 @@ def build_scan_shell(
         ),
     )
 
-    recent_name = ""
-    recent_image = None
-    if isinstance(recent_product, dict):
-        recent_name = str(recent_product.get("product_name") or "")
-        recent_image = recent_product.get("best_image_url")
+    recent_items = [item for item in list(recent_products or []) if isinstance(item, dict)][:5]
 
-    if recent_name:
-        recent_image_control: ft.Control
-        if isinstance(recent_image, str) and recent_image:
-            recent_image_control = ft.Image(
-                src=recent_image,
-                width=64,
-                height=64,
-                border_radius=12,
-            )
-        else:
-            recent_image_control = ft.Container(
-                width=64,
-                height=64,
-                border_radius=12,
-                bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-                alignment=ft.Alignment(0, 0),
-                content=ft.Text("🥫", size=28),
-            )
+    if recent_items:
+        recent_rows: list[ft.Control] = []
 
-        recent_content: ft.Control = ft.GestureDetector(
-            on_tap=on_recent_product_click,
-            content=ft.Container(
-                bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
-                border_radius=ThemeColors.CARD_RADIUS_INNER,
-                padding=12,
-                content=ft.Row(
-                    spacing=12,
-                    controls=[
-                        recent_image_control,
-                        ft.Column(
-                            expand=True,
-                            spacing=4,
+        for recent_product in recent_items:
+            recent_name = str(recent_product.get("product_name") or "Unknown product")
+            recent_image = recent_product.get("best_image_url")
+
+            recent_image_control: ft.Control
+            if isinstance(recent_image, str) and recent_image:
+                recent_image_control = ft.Image(
+                    src=recent_image,
+                    width=64,
+                    height=64,
+                    border_radius=12,
+                )
+            else:
+                recent_image_control = ft.Container(
+                    width=64,
+                    height=64,
+                    border_radius=12,
+                    bgcolor="#F1F4F8",
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Text("🥫", size=28),
+                )
+
+            recent_rows.append(
+                ft.GestureDetector(
+                    on_tap=lambda _, product=recent_product: on_recent_product_click(product),
+                    content=ft.Container(
+                        bgcolor="#F7FAFC",
+                        border_radius=ThemeColors.CARD_RADIUS_INNER,
+                        padding=12,
+                        content=ft.Row(
+                            spacing=12,
                             controls=[
-                                ft.Text(
-                                    recent_name,
-                                    max_lines=2,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                    size=16,
-                                    color=ThemeColors.TEXT_PRIMARY,
-                                    weight=ft.FontWeight.BOLD,
+                                recent_image_control,
+                                ft.Column(
+                                    expand=True,
+                                    spacing=4,
+                                    controls=[
+                                        ft.Text(
+                                            recent_name,
+                                            max_lines=2,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                            size=16,
+                                            color=ThemeColors.TEXT_PRIMARY,
+                                            weight=ft.FontWeight.BOLD,
+                                        ),
+                                        ft.Text(
+                                            "Tap to view food facts",
+                                            size=13,
+                                            color=ThemeColors.TEXT_SECONDARY,
+                                        ),
+                                    ],
                                 ),
-                                ft.Text(
-                                    "Tap to view food facts",
-                                    size=13,
-                                    color=ThemeColors.TEXT_SECONDARY,
-                                ),
+                                ft.Icon(ft.Icons.CHEVRON_RIGHT, color=ThemeColors.TEXT_INACTIVE),
                             ],
                         ),
-                        ft.Icon(ft.Icons.CHEVRON_RIGHT, color=ThemeColors.TEXT_INACTIVE),
-                    ],
-                ),
-            ),
+                    ),
+                )
+            )
+
+        recent_content: ft.Control = ft.Column(
+            spacing=8,
+            controls=recent_rows,
         )
     else:
         recent_content = ft.Container(
-            bgcolor="#FFFFFF",
+            bgcolor="#F7FAFC",
             border_radius=14,
             padding=12,
             content=ft.Text(
@@ -930,54 +881,92 @@ def build_scan_shell(
         )
 
     recent_scanned_section = ft.Container(
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+        bgcolor="#FFFFFF",
         border_radius=ThemeColors.CARD_RADIUS_OUTER,
         padding=ThemeColors.CARD_PADDING,
         content=ft.Column(
             spacing=8,
             controls=[
-                ft.Text(
-                    "Recently Scanned",
-                    size=16,
-                    weight=ft.FontWeight.BOLD,
-                    color=ThemeColors.TEXT_PRIMARY,
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            "Recently Scanned",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                            color=ThemeColors.GREEN_TEXT,
+                        ),
+                        ft.Button(
+                            content=ft.Text("Clear", size=12),
+                            on_click=on_clear_recent_click,
+                            style=ft.ButtonStyle(
+                                bgcolor="#F1F4F8",
+                                color=ThemeColors.TEXT_PRIMARY,
+                                padding=ft.Padding(left=10, top=2, right=10, bottom=2),
+                                shape=ft.RoundedRectangleBorder(radius=10),
+                            ),
+                        ),
+                    ],
                 ),
                 recent_content,
             ],
         ),
     )
 
+    compact_nav = metrics["shell_width"] < 360
     bottom_nav_controls: list[ft.Control] = [
         ft.GestureDetector(
             on_tap=on_home_click,
-            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Home"),
+            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Dashboard", compact=compact_nav),
         ),
-        build_nav_item(ft.Icons.QR_CODE_SCANNER, "Scan", selected=True),
-        build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry"),
-        build_nav_item(ft.Icons.PERSON_OUTLINE, "Me"),
+        build_nav_item(ft.Icons.CAMERA_ALT_OUTLINED, "Scan Food", selected=True, compact=compact_nav),
+        ft.GestureDetector(
+            on_tap=on_pantry_click,
+            content=build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry", compact=compact_nav),
+        ),
+        ft.GestureDetector(
+            on_tap=on_me_click,
+            content=build_nav_item(ft.Icons.PERSON_OUTLINE, "Me", compact=compact_nav),
+        ),
     ]
 
     page_controls = cast(list[ft.Control], [
         ft.Container(
-            bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
+            bgcolor="#FFFFFF",
             border_radius=26,
-            padding=ft.Padding(left=8, top=8, right=8, bottom=8),
+            padding=ft.Padding(left=12, top=10, right=12, bottom=10),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.IconButton(ft.Icons.ARROW_BACK_IOS_NEW, on_click=on_back_click, icon_color="#0F0F0F"),
-                    ft.Text(
-                        "Add Product 🌱",
-                        size=36 if metrics["is_desktop"] else 22,
-                        weight=ft.FontWeight.BOLD,
-                        color=ThemeColors.GREEN_TEXT,
+                    ft.Column(
+                        spacing=0,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text(
+                                "PantryIQ Connect",
+                                size=24 if metrics["is_desktop"] else 18,
+                                weight=ft.FontWeight.BOLD,
+                                color=ThemeColors.GREEN_TEXT,
+                            ),
+                            ft.Text(
+                                "Scan Food",
+                                size=14,
+                                color=ThemeColors.TEXT_SECONDARY,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                        ],
                     ),
                     ft.IconButton(ft.Icons.HELP_OUTLINE_ROUNDED, icon_color="#0F0F0F"),
                 ],
             ),
         ),
         ft.Container(
-            padding=ft.Padding(left=8, top=8, right=8, bottom=0),
+            bgcolor="#FFFFFF",
+            border_radius=16,
+            padding=ft.Padding(left=12, top=10, right=12, bottom=10),
             content=ft.Row(
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -1007,24 +996,30 @@ def build_scan_shell(
             alignment=ft.MainAxisAlignment.CENTER,
             controls=action_controls,
         ),
-        status_text,
-        result_text,
+        ft.Container(
+            bgcolor="#FFFFFF",
+            border_radius=14,
+            padding=ft.Padding(left=12, top=8, right=12, bottom=8),
+            content=ft.Column(
+                spacing=4,
+                controls=[status_text, result_text],
+            ),
+        ),
         ft.Row(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Container(expand=True, height=1, bgcolor="#C8CED9"),
                 ft.Container(
-                    bgcolor=ThemeColors.ACCENT_YELLOW,
+                    bgcolor="#F1F4F8",
                     border_radius=16,
                     padding=ft.Padding(left=16, top=6, right=16, bottom=6),
-                    content=ft.Text("OR", size=18, weight=ft.FontWeight.BOLD, color="#111111"),
+                    content=ft.Text("OR", size=18, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_SECONDARY),
                 ),
                 ft.Container(expand=True, height=1, bgcolor="#C8CED9"),
             ],
         ),
         manual_entry_card,
         recent_scanned_section,
-        where_card,
         freshness_card,
         ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -1035,16 +1030,15 @@ def build_scan_shell(
                         content=ft.Text("Back"),
                         on_click=on_back_click,
                         style=ft.ButtonStyle(
-                            bgcolor="#FFFFFF",
-                            color="#134723",
-                            side=ft.BorderSide(2, "#1F6D33"),
+                            bgcolor="#2E5D4E",
+                            color=ThemeColors.BRAND_ON_PRIMARY,
                             shape=ft.RoundedRectangleBorder(radius=16),
                         ),
                     ),
                     ft.Button(
                         content=ft.Text("Next"),
                         style=ft.ButtonStyle(
-                            bgcolor=ThemeColors.BRAND_PRIMARY,
+                            bgcolor="#2E5D4E",
                             color=ThemeColors.BRAND_ON_PRIMARY,
                             shape=ft.RoundedRectangleBorder(radius=16),
                         ),
@@ -1060,10 +1054,10 @@ def build_scan_shell(
         left=0,
         right=0,
         bottom=0,
-        bgcolor=ThemeColors.GREEN_SURFACE,
-        padding=ft.Padding(left=16, top=6, right=16, bottom=8),
+        bgcolor="#FFFFFF",
+        padding=ft.Padding(left=12, top=8, right=12, bottom=10),
         content=ft.Column(
-            spacing=8,
+            spacing=6,
             controls=[
                 ft.Divider(height=1, color=ThemeColors.DIVIDER),
                 ft.Row(
@@ -1079,7 +1073,7 @@ def build_scan_shell(
         height=metrics["shell_height"],
         bgcolor=ThemeColors.GREEN_SURFACE,
         border_radius=34,
-        padding=ft.Padding(left=0, top=0, right=0, bottom=16),
+        padding=ft.Padding(left=0, top=0, right=0, bottom=0),
         shadow=ft.BoxShadow(
             spread_radius=1,
             blur_radius=30,

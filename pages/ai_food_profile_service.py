@@ -384,18 +384,6 @@ def fetch_ai_food_profile(product_name: str, categories: str) -> dict | None:
             "Each fattom value must be exactly one of Low, Medium, High. "
             f"Product name: {name}. Categories: {category_text}."
         ),
-        (
-            "You are a food safety assistant. Return ONLY 12 lines exactly in this format: "
-            "risk: <value>\nconfidence: <value>\nshelf_life: <value>\nstorage: <value>\nimmediate_actions: <value>\nwarnings: <value>\n"
-            "fattom_food: <Low|Medium|High>\n"
-            "fattom_acidity: <Low|Medium|High>\n"
-            "fattom_time: <Low|Medium|High>\n"
-            "fattom_temperature: <Low|Medium|High>\n"
-            "fattom_oxygen: <Low|Medium|High>\n"
-            "fattom_moisture: <Low|Medium|High>. "
-            "Use realistic food guidance based on product type. "
-            f"Product name: {name}. Categories: {category_text}."
-        ),
     ]
 
     last_error = ""
@@ -409,7 +397,8 @@ def fetch_ai_food_profile(product_name: str, categories: str) -> dict | None:
             },
         )
 
-        for timeout_seconds in (12, 18, 25):
+        # Faster response path: short network budget then local smart fallback.
+        for timeout_seconds in (6, 10):
             try:
                 with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                     raw_text = response.read().decode("utf-8", errors="ignore")
