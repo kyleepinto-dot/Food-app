@@ -77,18 +77,17 @@ def _extract_fattom_levels(ai_profile: dict, text: str, risk: str) -> dict:
     }
 
 
-def build_nav_item(icon: ft.IconData, label: str, selected: bool = False) -> ft.Column:
+def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compact: bool = False) -> ft.Column:
     """Return a bottom navigation item with active/inactive visual state."""
 
-    icon_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
-    text_color = ThemeColors.BRAND_PRIMARY if selected else ThemeColors.TEXT_INACTIVE
+    icon_color = "#2E5D4E" if selected else ThemeColors.TEXT_INACTIVE
+    text_color = "#2E5D4E" if selected else ThemeColors.TEXT_INACTIVE
     weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
-    nav_item_controls: list[ft.Control] = [
-        ft.Icon(icon=icon, color=icon_color, size=24),
-        ft.Text(label, size=12, color=text_color, weight=weight),
-    ]
+    nav_item_controls: list[ft.Control] = [ft.Icon(icon=icon, color=icon_color, size=24)]
+    if not compact:
+        nav_item_controls.append(ft.Text(label, size=12, color=text_color, weight=weight))
     return ft.Column(
-        spacing=2,
+        spacing=2 if not compact else 0,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         controls=nav_item_controls,
     )
@@ -101,7 +100,7 @@ def _line(label: str, value: str, icon: str | None = None) -> ft.Container:
             width=28,
             height=28,
             border_radius=14,
-            bgcolor=ThemeColors.ACCENT_YELLOW_SOFT,
+            bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
             alignment=ft.Alignment(0, 0),
             content=ft.Text(icon, size=16),
         )
@@ -110,7 +109,7 @@ def _line(label: str, value: str, icon: str | None = None) -> ft.Container:
 
     return ft.Container(
         border_radius=ThemeColors.CARD_RADIUS_INNER,
-        bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+        bgcolor="#FFFFFF",
         padding=ThemeColors.CARD_PADDING,
         content=ft.Row(
             spacing=10,
@@ -324,7 +323,7 @@ def _fattom_grid(metrics: dict, fattom: dict) -> ft.Container:
         return ft.Container(
             width=card_width,
             border_radius=ThemeColors.CARD_RADIUS_INNER,
-            bgcolor=ThemeColors.ACCENT_YELLOW_SUBTLE,
+            bgcolor="#FFFFFF",
             padding=ThemeColors.CARD_PADDING,
             content=ft.Column(
                 spacing=2,
@@ -339,7 +338,7 @@ def _fattom_grid(metrics: dict, fattom: dict) -> ft.Container:
 
     return ft.Container(
         border_radius=ThemeColors.CARD_RADIUS_INNER,
-        bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
+        bgcolor="#FFFFFF",
         padding=ThemeColors.CARD_PADDING,
         content=ft.Row(
             wrap=True,
@@ -357,7 +356,15 @@ def _fattom_grid(metrics: dict, fattom: dict) -> ft.Container:
     )
 
 
-def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click, on_home_click, on_scan_click) -> ft.Container:
+def build_product_info_shell(
+    metrics: dict,
+    product: dict,
+    on_back_to_scan_click,
+    on_home_click,
+    on_scan_click,
+    on_pantry_click,
+    on_me_click,
+) -> ft.Container:
     """Render food facts page using scanned food data on the same app view."""
 
     product_name = str(product.get("product_name") or "Unknown product")
@@ -365,19 +372,23 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
     profile = _derive_food_profile(product)
     handling_tips = _derive_product_handling_tips(product)
     ai_profile_status = str(product.get("ai_food_profile_status") or "").lower()
+    is_cached_profile = bool(product.get("ai_food_profile_cached"))
 
     if profile.get("source") == "AI":
         profile_status_text = "Profile source: AI generated"
         profile_status_color = "#1F5A36"
     elif ai_profile_status == "ready_local":
         profile_status_text = "Profile source: Local smart profile (remote AI unavailable)"
-        profile_status_color = "#7A4D1D"
+        profile_status_color = "#2A2A2A"
     elif ai_profile_status == "pending":
         profile_status_text = "Profile source: AI generating... (temporary fallback shown)"
-        profile_status_color = "#8A6D1D"
+        profile_status_color = "#2A2A2A"
     else:
         profile_status_text = "Profile source: Fallback heuristic (AI unavailable)"
         profile_status_color = "#8A3B24"
+
+    if is_cached_profile and (profile.get("source") == "AI" or ai_profile_status == "ready_local"):
+        profile_status_text = f"{profile_status_text} (cached)"
 
     summary_text = f"{product_name} is categorized as {category_text}. {profile['storage']}"
 
@@ -532,7 +543,7 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
             expand=True,
             height=210,
             alignment=ft.Alignment(0, 0),
-            bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
+            bgcolor=ThemeColors.PREVIEW_FALLBACK_BACKGROUND,
             content=ft.Text("No product image", color=ThemeColors.TEXT_INACTIVE),
         )
 
@@ -558,13 +569,18 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
                                 controls=[
                                     ft.Container(
                                         border_radius=10,
-                                        bgcolor=ThemeColors.ACCENT_YELLOW,
+                                        bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
                                         padding=ft.Padding(left=8, top=4, right=8, bottom=4),
-                                        content=ft.Text(profile["risk"], size=11, weight=ft.FontWeight.BOLD),
+                                        content=ft.Text(
+                                            profile["risk"],
+                                            size=11,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=ThemeColors.GREEN_TEXT,
+                                        ),
                                     ),
                                     ft.Container(
                                         border_radius=10,
-                                        bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
+                                        bgcolor="#F1F4F8",
                                         padding=ft.Padding(left=8, top=4, right=8, bottom=4),
                                         content=ft.Text(profile["confidence"], size=11, weight=ft.FontWeight.BOLD),
                                     ),
@@ -618,7 +634,7 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
 
     content_controls: list[ft.Control] = [
         ft.Container(
-            bgcolor=ThemeColors.GREEN_SURFACE_SOFT,
+            bgcolor="#FFFFFF",
             border_radius=24,
             padding=ft.Padding(
                 left=ThemeColors.CARD_PADDING,
@@ -655,17 +671,24 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
         ft.Container(height=160),
     ]
 
+    compact_nav = metrics["shell_width"] < 360
     bottom_nav_controls: list[ft.Control] = [
         ft.GestureDetector(
             on_tap=on_home_click,
-            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Home"),
+            content=build_nav_item(ft.Icons.HOME_ROUNDED, "Home", compact=compact_nav),
         ),
         ft.GestureDetector(
             on_tap=on_scan_click,
-            content=build_nav_item(ft.Icons.QR_CODE_SCANNER, "Scan", selected=True),
+            content=build_nav_item(ft.Icons.QR_CODE_SCANNER, "Scan", selected=True, compact=compact_nav),
         ),
-        build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry"),
-        build_nav_item(ft.Icons.PERSON_OUTLINE, "Me"),
+        ft.GestureDetector(
+            on_tap=on_pantry_click,
+            content=build_nav_item(ft.Icons.INVENTORY_2_OUTLINED, "Pantry", compact=compact_nav),
+        ),
+        ft.GestureDetector(
+            on_tap=on_me_click,
+            content=build_nav_item(ft.Icons.PERSON_OUTLINE, "Me", compact=compact_nav),
+        ),
     ]
 
     floating_add_button = ft.Container(
@@ -676,8 +699,8 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
             content=ft.Text("Add Product To Pantry"),
             on_click=lambda _: None,
             style=ft.ButtonStyle(
-                bgcolor=ThemeColors.ACCENT_YELLOW,
-                color=ThemeColors.TEXT_PRIMARY,
+                bgcolor="#2E5D4E",
+                color=ThemeColors.BRAND_ON_PRIMARY,
                 shape=ft.RoundedRectangleBorder(radius=18),
                 shadow_color="#33000000",
             ),
@@ -688,7 +711,7 @@ def build_product_info_shell(metrics: dict, product: dict, on_back_to_scan_click
         left=0,
         right=0,
         bottom=0,
-        bgcolor=ThemeColors.GREEN_SURFACE,
+        bgcolor="#FFFFFF",
         padding=ft.Padding(left=16, top=6, right=16, bottom=8),
         content=ft.Column(
             spacing=8,
