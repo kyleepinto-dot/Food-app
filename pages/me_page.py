@@ -64,10 +64,16 @@ def _setting_row(icon: ft.IconData, label: str, helper: str) -> ft.Container:
     )
 
 
-def build_me_shell(metrics: dict, on_home_click, on_scan_click, on_pantry_click) -> ft.Container:
+def build_me_shell(metrics: dict, on_home_click, on_scan_click, on_pantry_click, profile: dict) -> ft.Container:
     """Render account/profile page using the same visual language as app screens."""
 
     compact_nav = metrics["shell_width"] < 360
+    profile_name = str(profile.get("name") or "PantryIQ Member")
+    membership = str(profile.get("membership") or "Community Member")
+    profile_message = str(profile.get("message") or "Keep food fresh and reduce waste.")
+    scan_count = int(profile.get("scan_count") or 0)
+    pantry_item_count = int(profile.get("pantry_item_count") or 0)
+    food_saved_lbs = float(profile.get("food_saved_lbs") or 0)
 
     bottom_nav_controls: list[ft.Control] = [
         ft.GestureDetector(
@@ -136,9 +142,9 @@ def build_me_shell(metrics: dict, on_home_click, on_scan_click, on_pantry_click)
                     ft.Column(
                         spacing=2,
                         controls=[
-                            ft.Text("Jamie Carter", size=22 if metrics["is_desktop"] else 18, weight=ft.FontWeight.BOLD),
-                            ft.Text("Community Member", size=13, color=ThemeColors.TEXT_SECONDARY),
-                            ft.Text("Keeping food fresh, sharing what I can.", size=12, color=ThemeColors.TEXT_SECONDARY),
+                            ft.Text(profile_name, size=22 if metrics["is_desktop"] else 18, weight=ft.FontWeight.BOLD),
+                            ft.Text(membership, size=13, color=ThemeColors.TEXT_SECONDARY),
+                            ft.Text(profile_message, size=12, color=ThemeColors.TEXT_SECONDARY),
                         ],
                     ),
                 ],
@@ -155,9 +161,9 @@ def build_me_shell(metrics: dict, on_home_click, on_scan_click, on_pantry_click)
                     ft.Row(
                         spacing=8,
                         controls=[
-                            _profile_metric("Scans", "184"),
-                            _profile_metric("Pantry Items", "24"),
-                            _profile_metric("Food Saved", "128 lbs"),
+                            _profile_metric("Scans", str(scan_count)),
+                            _profile_metric("Pantry Items", str(pantry_item_count)),
+                            _profile_metric("Food Saved", f"{food_saved_lbs:g} lbs"),
                         ],
                     ),
                 ],
@@ -171,10 +177,10 @@ def build_me_shell(metrics: dict, on_home_click, on_scan_click, on_pantry_click)
                 spacing=8,
                 controls=[
                     ft.Text("Settings", size=16, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_PRIMARY),
-                    _setting_row(ft.Icons.NOTIFICATIONS_NONE, "Notifications", "Expiry reminders and scan updates"),
-                    _setting_row(ft.Icons.LANGUAGE, "Language", "English (US)"),
-                    _setting_row(ft.Icons.PRIVACY_TIP_OUTLINED, "Privacy", "Manage shared data preferences"),
-                    _setting_row(ft.Icons.HELP_OUTLINE_ROUNDED, "Help & Support", "FAQs and contact options"),
+                    _setting_row(ft.Icons.NOTIFICATIONS_NONE, "Notifications", str(profile.get("notifications") or "Not configured")),
+                    _setting_row(ft.Icons.LANGUAGE, "Language", str(profile.get("language") or "Not configured")),
+                    _setting_row(ft.Icons.PRIVACY_TIP_OUTLINED, "Privacy", str(profile.get("privacy") or "Not configured")),
+                    _setting_row(ft.Icons.HELP_OUTLINE_ROUNDED, "Help & Support", str(profile.get("support") or "Not configured")),
                 ],
             ),
         ),

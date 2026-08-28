@@ -20,7 +20,7 @@ def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compac
     )
 
 
-def _pantry_item(name: str, qty: str, freshness: str, days_left: str) -> ft.Container:
+def _pantry_item(name: str, qty: int, freshness: str, category: str, on_quantity_change, item_key: str) -> ft.Container:
     return ft.Container(
         bgcolor="#F7FAFC",
         border_radius=14,
@@ -33,7 +33,7 @@ def _pantry_item(name: str, qty: str, freshness: str, days_left: str) -> ft.Cont
                     spacing=2,
                     controls=[
                         ft.Text(name, size=15, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_PRIMARY),
-                        ft.Text(f"Qty: {qty}", size=12, color=ThemeColors.TEXT_SECONDARY),
+                        ft.Text(f"Qty: {qty} | {category}", size=12, color=ThemeColors.TEXT_SECONDARY),
                     ],
                 ),
                 ft.Column(
@@ -41,7 +41,28 @@ def _pantry_item(name: str, qty: str, freshness: str, days_left: str) -> ft.Cont
                     spacing=2,
                     controls=[
                         ft.Text(freshness, size=12, weight=ft.FontWeight.W_600, color=ThemeColors.GREEN_TEXT),
-                        ft.Text(days_left, size=11, color=ThemeColors.TEXT_SECONDARY),
+                        ft.Text("Added from product details", size=11, color=ThemeColors.TEXT_SECONDARY),
+                        ft.Row(
+                            tight=True,
+                            spacing=2,
+                            controls=[
+                                ft.IconButton(
+                                    ft.Icons.REMOVE,
+                                    icon_size=16,
+                                    icon_color=ThemeColors.GREEN_TEXT,
+                                    tooltip="Decrease quantity",
+                                    on_click=lambda _: on_quantity_change(item_key, -1),
+                                ),
+                                ft.Text(str(qty), size=14, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_PRIMARY),
+                                ft.IconButton(
+                                    ft.Icons.ADD,
+                                    icon_size=16,
+                                    icon_color=ThemeColors.GREEN_TEXT,
+                                    tooltip="Increase quantity",
+                                    on_click=lambda _: on_quantity_change(item_key, 1),
+                                ),
+                            ],
+                        ),
                     ],
                 ),
             ],
@@ -49,10 +70,47 @@ def _pantry_item(name: str, qty: str, freshness: str, days_left: str) -> ft.Cont
     )
 
 
-def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click) -> ft.Container:
+def build_pantry_shell(
+    metrics: dict,
+    on_home_click,
+    on_scan_click,
+    on_me_click,
+    on_meal_planner_click,
+    on_dummy_meal_planner_click,
+    pantry_products: list[dict],
+    on_quantity_change,
+) -> ft.Container:
     """Render pantry dashboard with the same style language as home/scan."""
 
     compact_nav = metrics["shell_width"] < 360
+    pantry_items = [item for item in pantry_products if isinstance(item, dict)]
+    pantry_item_count = sum(int(item.get("quantity") or 0) for item in pantry_items)
+
+    if pantry_items:
+        pantry_rows: list[ft.Control] = [
+            _pantry_item(
+                str(item.get("name") or "Unknown product"),
+                int(item.get("quantity") or 1),
+                str(item.get("freshness") or "Added"),
+                str(item.get("category") or "Food item"),
+                on_quantity_change,
+                str(item.get("key") or ""),
+            )
+            for item in pantry_items
+        ]
+    else:
+        pantry_rows = [
+            ft.Container(
+                bgcolor="#F7FAFC",
+                border_radius=14,
+                padding=12,
+                content=ft.Text(
+                    "No items in your pantry yet. Add a scanned product from Product Details.",
+                    size=13,
+                    color=ThemeColors.TEXT_SECONDARY,
+                ),
+            )
+        ]
 
     bottom_nav_controls: list[ft.Control] = [
         ft.GestureDetector(
@@ -121,7 +179,7 @@ def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click)
                         bgcolor="#FFFFFF",
                         border_radius=12,
                         padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-                        content=ft.Text("24 Items", size=14, weight=ft.FontWeight.BOLD),
+                        content=ft.Text(f"{pantry_item_count} Items", size=14, weight=ft.FontWeight.BOLD),
                     ),
                 ],
             ),
@@ -133,12 +191,49 @@ def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click)
             content=ft.Column(
                 spacing=8,
                 controls=[
-                    ft.Text("Needs Attention", size=16, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_PRIMARY),
-                    _pantry_item("Greek Yogurt", "2", "Use soon", "1 day left"),
-                    _pantry_item("Spinach", "1 bag", "Use soon", "2 days left"),
-                    _pantry_item("Milk", "1", "Good", "4 days left"),
-                ],
+                    ft.Text("Pantry Items", size=16, weight=ft.FontWeight.BOLD, color=ThemeColors.TEXT_PRIMARY),
+                ] + pantry_rows,
             ),
+        ),
+        ft.Row(
+            spacing=8,
+            controls=[
+                ft.Button(
+                    expand=True,
+                    content=ft.Row(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.RESTAURANT_MENU, color=ThemeColors.BRAND_ON_PRIMARY, size=18),
+                            ft.Text("Meal Planner", weight=ft.FontWeight.BOLD),
+                        ],
+                    ),
+                    on_click=on_meal_planner_click,
+                    style=ft.ButtonStyle(
+                        bgcolor=ThemeColors.BRAND_PRIMARY,
+                        color=ThemeColors.BRAND_ON_PRIMARY,
+                        shape=ft.RoundedRectangleBorder(radius=14),
+                    ),
+                ),
+                ft.Button(
+                    expand=True,
+                    content=ft.Row(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.SCIENCE_OUTLINED, color=ThemeColors.GREEN_TEXT, size=18),
+                            ft.Text("Dummy Planner", weight=ft.FontWeight.BOLD),
+                        ],
+                    ),
+                    on_click=on_dummy_meal_planner_click,
+                    style=ft.ButtonStyle(
+                        bgcolor="#FFFFFF",
+                        color=ThemeColors.GREEN_TEXT,
+                        side=ft.BorderSide(width=1, color=ThemeColors.BRAND_PRIMARY),
+                        shape=ft.RoundedRectangleBorder(radius=14),
+                    ),
+                ),
+            ],
         ),
         ft.Container(
             bgcolor="#FFFFFF",
@@ -160,7 +255,7 @@ def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click)
                                     spacing=2,
                                     controls=[
                                         ft.Text("Fridge", size=12, color=ThemeColors.TEXT_SECONDARY),
-                                        ft.Text("10 items", size=18, weight=ft.FontWeight.BOLD),
+                                        ft.Text("0 items", size=18, weight=ft.FontWeight.BOLD),
                                     ],
                                 ),
                             ),
@@ -173,7 +268,7 @@ def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click)
                                     spacing=2,
                                     controls=[
                                         ft.Text("Pantry", size=12, color=ThemeColors.TEXT_SECONDARY),
-                                        ft.Text("9 items", size=18, weight=ft.FontWeight.BOLD),
+                                        ft.Text(f"{pantry_item_count} items", size=18, weight=ft.FontWeight.BOLD),
                                     ],
                                 ),
                             ),
@@ -186,7 +281,7 @@ def build_pantry_shell(metrics: dict, on_home_click, on_scan_click, on_me_click)
                                     spacing=2,
                                     controls=[
                                         ft.Text("Freezer", size=12, color=ThemeColors.TEXT_SECONDARY),
-                                        ft.Text("5 items", size=18, weight=ft.FontWeight.BOLD),
+                                        ft.Text("0 items", size=18, weight=ft.FontWeight.BOLD),
                                     ],
                                 ),
                             ),

@@ -364,6 +364,7 @@ def build_product_info_shell(
     on_scan_click,
     on_pantry_click,
     on_me_click,
+    on_add_to_pantry,
 ) -> ft.Container:
     """Render food facts page using scanned food data on the same app view."""
 
@@ -632,6 +633,18 @@ def build_product_info_shell(
     if bool(handling_tips.get("ethylene_needed")):
         details_controls.append(_line("Ethylene Compatibility", handling_tips["ethylene_tip"], "🍎"))
 
+    quantity_field = ft.TextField(
+        value="1",
+        label="Quantity to add",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        text_align=ft.TextAlign.CENTER,
+        width=132,
+        height=48,
+        border_radius=12,
+        border_color=ThemeColors.GREEN_TEXT,
+        focused_border_color="#2E5D4E",
+    )
+
     content_controls: list[ft.Control] = [
         ft.Container(
             bgcolor="#FFFFFF",
@@ -695,15 +708,22 @@ def build_product_info_shell(
         left=16,
         right=16,
         bottom=68,
-        content=ft.Button(
-            content=ft.Text("Add Product To Pantry"),
-            on_click=lambda _: None,
-            style=ft.ButtonStyle(
-                bgcolor="#2E5D4E",
-                color=ThemeColors.BRAND_ON_PRIMARY,
-                shape=ft.RoundedRectangleBorder(radius=18),
-                shadow_color="#33000000",
-            ),
+        content=ft.Row(
+            spacing=8,
+            controls=[
+                quantity_field,
+                ft.Button(
+                    expand=True,
+                    content=ft.Text("Add To Pantry"),
+                    on_click=lambda _: on_add_to_pantry(quantity_field.value),
+                    style=ft.ButtonStyle(
+                        bgcolor="#2E5D4E",
+                        color=ThemeColors.BRAND_ON_PRIMARY,
+                        shape=ft.RoundedRectangleBorder(radius=18),
+                        shadow_color="#33000000",
+                    ),
+                ),
+            ],
         ),
     )
 
