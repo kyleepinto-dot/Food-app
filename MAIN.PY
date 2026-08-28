@@ -1,14 +1,17 @@
 import flet as ft
 import asyncio
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
 from pages.ai_food_profile_service import fetch_ai_food_profile, get_last_ai_food_profile_error
 from pages.home_page import build_home_shell
+from pages.meal_suggestion_page import build_meal_suggestion_shell
+from pages.meal_suggestion_service import fetch_ai_meal_suggestions, rank_pantry_items
 from pages.pantry_page import build_pantry_shell
 from pages.me_page import build_me_shell
-from pages.ai_image_service import build_ai_food_image_url
+from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
 from pages.product_info_page import build_product_info_shell
 from pages.theme import ThemeColors
@@ -39,7 +42,30 @@ def main(page: ft.Page):
     # Track which screen should be displayed by render_current_view().
     # Dict wrapper is used so nested callbacks can mutate active state
     # without introducing nonlocal statements.
-    view_state = {"current": "home", "product": None, "recent_products": [], "ai_profile_cache": {}}
+    view_state = {
+        "current": "home",
+        "product": None,
+        "recent_products": [],
+        "pantry_products": [],
+        "ai_profile_cache": {},
+        "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None},
+        "meal_request_version": 0,
+        "meal_demo_number": 0,
+        "meal_inventory": [],
+        "meal_is_dummy": False,
+        "profile": {
+            "name": "Jamie Carter",
+            "membership": "Community Member",
+            "message": "Keeping food fresh, sharing what I can.",
+            "scan_count": 0,
+            "pantry_item_count": 0,
+            "food_saved_lbs": 0.0,
+            "notifications": "Expiry reminders and scan updates",
+            "language": "English (US)",
+            "privacy": "Manage shared data preferences",
+            "support": "FAQs and contact options",
+        },
+    }
 
     def _ai_profile_cache_key(product_name: str, categories: str) -> str:
         return f"{product_name.strip().lower()}|{categories.strip().lower()}"
@@ -65,6 +91,162 @@ def main(page: ft.Page):
         target_key = _recent_product_key(product)
         deduped = [item for item in existing if isinstance(item, dict) and _recent_product_key(item) != target_key]
         view_state["recent_products"] = [product] + deduped[:4]
+
+    def record_successful_scan() -> None:
+        """Update profile impact totals after a successful product lookup."""
+
+        profile = view_state.get("profile")
+        if not isinstance(profile, dict):
+            return
+
+        profile["scan_count"] = int(profile.get("scan_count") or 0) + 1
+        # This is an app-level estimate until the pantry tracks actual weights.
+        profile["food_saved_lbs"] = round(float(profile.get("food_saved_lbs") or 0) + 0.7, 1)
+
+    def invalidate_meal_plan() -> None:
+        """Discard a plan whenever pantry contents change."""
+
+        view_state["meal_request_version"] = int(view_state.get("meal_request_version") or 0) + 1
+        view_state["meal_plan"] = {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None}
+
+    def build_meal_inventory() -> list[dict]:
+        """Enrich pantry rows with their latest AI shelf-life profiles."""
+
+        products_by_key = {
+            _recent_product_key(product): product
+            for product in view_state.get("recent_products") or []
+            if isinstance(product, dict)
+        }
+        inventory: list[dict] = []
+        for pantry_item in view_state.get("pantry_products") or []:
+            if not isinstance(pantry_item, dict):
+                continue
+            enriched_item = dict(pantry_item)
+            source_product = products_by_key.get(str(pantry_item.get("key") or ""), {})
+            ai_profile = source_product.get("ai_food_profile") if isinstance(source_product, dict) else None
+            if isinstance(ai_profile, dict):
+                enriched_item["risk"] = str(ai_profile.get("risk") or enriched_item.get("risk") or "Medium Risk")
+                enriched_item["shelf_life"] = str(
+                    ai_profile.get("shelf_life") or enriched_item.get("shelf_life") or "5-10 days"
+                )
+            enriched_item.setdefault("risk", "Medium Risk")
+            enriched_item.setdefault("shelf_life", "5-10 days")
+            inventory.append(enriched_item)
+        return inventory
+
+    def build_dummy_meal_inventory(demo_number: int) -> list[dict]:
+        """Return a rotating sample pantry so repeated clicks create new demos."""
+
+        demo_sets = [
+            [
+                ("Baby spinach", "Produce", 1, "1 day", "High Risk"),
+                ("Chicken breast", "Meat", 2, "2 days", "High Risk"),
+                ("Greek yogurt", "Dairy", 1, "4 days", "Medium Risk"),
+                ("Brown rice", "Whole grain", 1, "3 months", "Low Risk"),
+            ],
+            [
+                ("Ripe tomatoes", "Produce", 4, "1 day", "High Risk"),
+                ("Black beans", "Protein", 1, "5 days", "Medium Risk"),
+                ("Corn tortillas", "Whole grain", 6, "8 days", "Medium Risk"),
+                ("Frozen corn", "Vegetable", 1, "2 months", "Low Risk"),
+            ],
+            [
+                ("Fresh mushrooms", "Produce", 1, "2 days", "High Risk"),
+                ("Firm tofu", "Plant protein", 1, "4 days", "Medium Risk"),
+                ("Broccoli", "Vegetable", 2, "6 days", "Medium Risk"),
+                ("Whole-wheat noodles", "Whole grain", 1, "4 months", "Low Risk"),
+            ],
+        ]
+        selected_set = demo_sets[(demo_number - 1) % len(demo_sets)]
+        return [
+            {
+                "key": f"demo:{demo_number}:{index}",
+                "name": name,
+                "category": category,
+                "quantity": quantity,
+                "freshness": "Demo item",
+                "storage": "Demo pantry",
+                "added_at": datetime.now(timezone.utc).isoformat(),
+                "shelf_life": shelf_life,
+                "risk": risk,
+            }
+            for index, (name, category, quantity, shelf_life, risk) in enumerate(selected_set)
+        ]
+
+    def add_product_to_pantry(quantity_value=1) -> None:
+        """Store the selected quantity of the current product, then open Pantry."""
+
+        product = view_state.get("product")
+        if not isinstance(product, dict):
+            return
+
+        try:
+            quantity = max(1, int(str(quantity_value or "1").strip()))
+        except (TypeError, ValueError):
+            quantity = 1
+
+        product_name = str(product.get("product_name") or product.get("generic_name") or "Unknown product").strip()
+        product_key = _recent_product_key(product)
+        pantry_products = list(view_state.get("pantry_products") or [])
+        ai_profile_value = product.get("ai_food_profile")
+        ai_profile = ai_profile_value if isinstance(ai_profile_value, dict) else {}
+
+        for pantry_item in pantry_products:
+            if isinstance(pantry_item, dict) and pantry_item.get("key") == product_key:
+                pantry_item["quantity"] = int(pantry_item.get("quantity") or 1) + quantity
+                if ai_profile:
+                    pantry_item["risk"] = str(ai_profile.get("risk") or pantry_item.get("risk") or "Medium Risk")
+                    pantry_item["shelf_life"] = str(
+                        ai_profile.get("shelf_life") or pantry_item.get("shelf_life") or "5-10 days"
+                    )
+                break
+        else:
+            pantry_products.insert(
+                0,
+                {
+                    "key": product_key,
+                    "name": product_name,
+                    "category": str(product.get("categories") or "Food item"),
+                    "quantity": quantity,
+                    "freshness": "Freshly added",
+                    "storage": "Pantry",
+                    "added_at": datetime.now(timezone.utc).isoformat(),
+                    "risk": str(ai_profile.get("risk") or "Medium Risk"),
+                    "shelf_life": str(ai_profile.get("shelf_life") or "5-10 days"),
+                },
+            )
+
+        view_state["pantry_products"] = pantry_products
+        invalidate_meal_plan()
+        profile = view_state.get("profile")
+        if isinstance(profile, dict):
+            profile["pantry_item_count"] = sum(
+                int(item.get("quantity") or 0) for item in pantry_products if isinstance(item, dict)
+            )
+
+        show_pantry()
+
+    def change_pantry_quantity(product_key: str, amount: int) -> None:
+        """Adjust an existing pantry quantity and remove rows that reach zero."""
+
+        pantry_products = [item for item in view_state.get("pantry_products") or [] if isinstance(item, dict)]
+        updated_products: list[dict] = []
+
+        for pantry_item in pantry_products:
+            if pantry_item.get("key") == product_key:
+                pantry_item["quantity"] = int(pantry_item.get("quantity") or 0) + amount
+                if int(pantry_item["quantity"]) <= 0:
+                    continue
+            updated_products.append(pantry_item)
+
+        view_state["pantry_products"] = updated_products
+        invalidate_meal_plan()
+        profile = view_state.get("profile")
+        if isinstance(profile, dict):
+            profile["pantry_item_count"] = sum(int(item.get("quantity") or 0) for item in updated_products)
+
+        if view_state.get("current") == "pantry":
+            render_current_view()
 
     def warm_image_url(url: str) -> bool:
         """Best-effort warm-up so generated image is likely ready by display time."""
@@ -165,6 +347,44 @@ def main(page: ft.Page):
         if view_state.get("current") == "product" and view_state.get("product") is product:
             render_current_view()
 
+    async def hydrate_meal_plan_async(inventory: list[dict], request_version: int):
+        """Generate several meals, then hydrate their AI photos concurrently."""
+
+        suggestions = await asyncio.to_thread(fetch_ai_meal_suggestions, inventory)
+        if request_version != view_state.get("meal_request_version"):
+            return
+
+        meal_plan = view_state.get("meal_plan") or {}
+        meal_plan["suggestions"] = suggestions
+        meal_plan["status"] = "ready" if suggestions else "idle"
+        meal_plan["image_urls"] = []
+        view_state["meal_plan"] = meal_plan
+        if view_state.get("current") == "meals":
+            render_current_view()
+
+        if not suggestions:
+            return
+        image_urls = [
+            build_ai_meal_image_url(
+                str(suggestion.get("title") or "Healthy pantry meal"),
+                [
+                    str(ingredient.get("name") or "")
+                    for ingredient in suggestion.get("ingredients") or []
+                    if isinstance(ingredient, dict)
+                ],
+            ) or ""
+            for suggestion in suggestions
+        ]
+        warm_results = await asyncio.gather(
+            *(asyncio.to_thread(warm_image_url, url) if url else asyncio.sleep(0, result=False) for url in image_urls)
+        )
+        if request_version != view_state.get("meal_request_version"):
+            return
+
+        meal_plan["image_urls"] = [url if warmed else "" for url, warmed in zip(image_urls, warm_results)]
+        if view_state.get("current") == "meals":
+            render_current_view()
+
     def get_layout_metrics() -> dict:
         """Return responsive measurements consumed by both screen builders.
 
@@ -254,6 +474,13 @@ def main(page: ft.Page):
             page.update()
             return
 
+        if view_state["current"] == "meals":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_meal_plan_view())
+            page.update()
+            return
+
         if view_state["current"] == "me":
             scanner_controller.stop_camera()
             page.clean()
@@ -287,6 +514,66 @@ def main(page: ft.Page):
         """Navigate to the pantry screen from button/tap handlers."""
 
         view_state["current"] = "pantry"
+        render_current_view()
+
+    def show_meal_planner(_=None):
+        """Open the planner with the user's current pantry inventory."""
+
+        invalidate_meal_plan()
+        inventory = build_meal_inventory()
+        view_state["meal_inventory"] = inventory
+        view_state["meal_is_dummy"] = False
+        start_meal_request(inventory)
+
+    def show_dummy_meal_planner(_=None):
+        """Open a new rotating dummy pantry page on every button click."""
+
+        invalidate_meal_plan()
+        demo_number = int(view_state.get("meal_demo_number") or 0) + 1
+        view_state["meal_demo_number"] = demo_number
+        inventory = build_dummy_meal_inventory(demo_number)
+        view_state["meal_inventory"] = inventory
+        view_state["meal_is_dummy"] = True
+        start_meal_request(inventory)
+
+    def start_meal_request(inventory: list[dict]) -> None:
+        """Render a planner inventory and asynchronously request its meals."""
+
+        meal_plan = view_state.get("meal_plan") or {}
+        view_state["current"] = "meals"
+        if not inventory:
+            render_current_view()
+            return
+        request_version = int(view_state.get("meal_request_version") or 0) + 1
+        view_state["meal_request_version"] = request_version
+        meal_plan["status"] = "loading"
+        view_state["meal_plan"] = meal_plan
+        render_current_view()
+        page.run_task(hydrate_meal_plan_async, inventory, request_version)
+
+    def refresh_meal_plan(_=None):
+        """Request a new group of meals using the currently displayed inventory."""
+
+        inventory = [item for item in view_state.get("meal_inventory") or [] if isinstance(item, dict)]
+        invalidate_meal_plan()
+        start_meal_request(inventory)
+
+    def select_meal_suggestion(index: int) -> None:
+        """Open complete ingredients and directions for one suggested dish."""
+
+        meal_plan = view_state.get("meal_plan") or {}
+        suggestions = meal_plan.get("suggestions") or []
+        if 0 <= index < len(suggestions):
+            meal_plan["selected_index"] = index
+            view_state["meal_plan"] = meal_plan
+            render_current_view()
+
+    def show_meal_suggestion_list(_=None) -> None:
+        """Return from recipe details to the meal name list."""
+
+        meal_plan = view_state.get("meal_plan") or {}
+        meal_plan["selected_index"] = None
+        view_state["meal_plan"] = meal_plan
         render_current_view()
 
     def show_me(_=None):
@@ -327,6 +614,7 @@ def main(page: ft.Page):
             scanner_controller.stop_camera()
             view_state["product"] = product
             remember_recent_product(product)
+            record_successful_scan()
             product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
@@ -359,6 +647,7 @@ def main(page: ft.Page):
             scanner_controller.stop_camera()
             view_state["product"] = product
             remember_recent_product(product)
+            record_successful_scan()
             product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
@@ -389,6 +678,7 @@ def main(page: ft.Page):
             on_me_click=show_me,
             recent_products=view_state.get("recent_products") or [],
             on_recent_product_click=show_recent_product,
+            profile=view_state.get("profile") or {},
         )
 
     def build_scan_view() -> ft.Container:
@@ -410,7 +700,7 @@ def main(page: ft.Page):
             # Async camera APIs are dispatched via page.run_task() so UI
             # remains responsive while camera operations are in-flight.
             on_start_camera=lambda e: page.run_task(scanner_controller.start_camera, e),
-            on_stop_camera=lambda e: (scanner_controller.stop_camera(), page.update()),
+            on_stop_camera=lambda _: (scanner_controller.stop_camera(), page.update()),
             on_take_photo=lambda e: page.run_task(scanner_controller.capture_photo_and_scan, e),
             on_manual_search=lambda e: page.run_task(scanner_controller.search_manual_barcode, e),
         )
@@ -433,6 +723,7 @@ def main(page: ft.Page):
             on_scan_click=show_scan,
             on_pantry_click=show_pantry,
             on_me_click=show_me,
+            on_add_to_pantry=add_product_to_pantry,
         )
 
     def build_pantry_view() -> ft.Container:
@@ -443,6 +734,29 @@ def main(page: ft.Page):
             on_home_click=show_home,
             on_scan_click=show_scan,
             on_me_click=show_me,
+            on_meal_planner_click=show_meal_planner,
+            on_dummy_meal_planner_click=show_dummy_meal_planner,
+            pantry_products=view_state.get("pantry_products") or [],
+            on_quantity_change=change_pantry_quantity,
+        )
+
+    def build_meal_plan_view() -> ft.Container:
+        # Meal planning stays linked to Pantry while using a dedicated screen.
+        metrics = get_layout_metrics()
+        inventory = [item for item in view_state.get("meal_inventory") or [] if isinstance(item, dict)]
+        return build_meal_suggestion_shell(
+            metrics=metrics,
+            on_back_click=show_pantry,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_pantry_click=show_pantry,
+            on_me_click=show_me,
+            ranked_items=rank_pantry_items(inventory),
+            meal_state=view_state.get("meal_plan") or {},
+            demo_number=int(view_state.get("meal_demo_number") or 1) if view_state.get("meal_is_dummy") else 0,
+            on_meal_click=select_meal_suggestion,
+            on_back_to_list_click=show_meal_suggestion_list,
+            on_refresh_click=refresh_meal_plan,
         )
 
     def build_me_view() -> ft.Container:
@@ -453,6 +767,7 @@ def main(page: ft.Page):
             on_home_click=show_home,
             on_scan_click=show_scan,
             on_pantry_click=show_pantry,
+            profile=view_state.get("profile") or {},
         )
 
     # Re-render on resize so responsive metrics are applied immediately.

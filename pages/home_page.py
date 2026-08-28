@@ -59,6 +59,7 @@ def build_home_shell(
     on_me_click,
     recent_products: list[dict] | None = None,
     on_recent_product_click=None,
+    profile: dict | None = None,
 ) -> ft.Container:
     """Compose the full home screen shell used by the main renderer.
 
@@ -69,6 +70,10 @@ def build_home_shell(
 
     content_padding = 18 if metrics["is_desktop"] else 14
     compact_nav = metrics["shell_width"] < 360
+    profile_data = profile or {}
+    scan_count = int(profile_data.get("scan_count") or 0)
+    pantry_item_count = int(profile_data.get("pantry_item_count") or 0)
+    food_saved_lbs = float(profile_data.get("food_saved_lbs") or 0)
 
     def info_tile(title: str, value: str, subtitle: str, icon: ft.IconData) -> ft.Container:
         return ft.Container(
@@ -335,9 +340,24 @@ def build_home_shell(
                 ft.Row(
                     spacing=8,
                     controls=[
-                        info_tile("Reduce Food Waste", "72%", "128 lbs avoided", ft.Icons.MONITOR_WEIGHT_OUTLINED),
-                        info_tile("Share & Donate", "64%", "86 items shared", ft.Icons.VOLUNTEER_ACTIVISM),
-                        info_tile("Meals Supported", "78%", "156 meals supported", ft.Icons.LUNCH_DINING_OUTLINED),
+                        info_tile(
+                            "Food Saved",
+                            f"{food_saved_lbs:g} lbs",
+                            "Estimated from your scans",
+                            ft.Icons.MONITOR_WEIGHT_OUTLINED,
+                        ),
+                        info_tile(
+                            "Pantry Stock",
+                            str(pantry_item_count),
+                            "Items you added",
+                            ft.Icons.INVENTORY_2_OUTLINED,
+                        ),
+                        info_tile(
+                            "Products Scanned",
+                            str(scan_count),
+                            "Successful lookups",
+                            ft.Icons.QR_CODE_SCANNER,
+                        ),
                     ],
                 ),
             ],
