@@ -9,7 +9,21 @@ from pages.ai_food_profile_service import fetch_ai_food_profile, get_last_ai_foo
 from pages.home_page import build_home_shell
 from pages.meal_suggestion_page import build_meal_suggestion_shell
 from pages.meal_suggestion_service import fetch_ai_meal_suggestions, rank_pantry_items
-from pages.pantry_page import build_pantry_shell
+from pages.pantry_page import (
+    build_add_pantry_shell,
+    build_pantry_item_options_shell,
+    build_pantry_shell,
+    discard_pantry_item,
+    get_pantry_item,
+    get_pantry_items,
+    init_pantry_db,
+    manual_pantry_draft,
+    pantry_items_for_meals,
+    save_pantry_item,
+    scanned_product_draft,
+    update_pantry_note,
+    update_pantry_quantity,
+)
 from pages.me_page import build_me_shell
 from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
@@ -37,6 +51,9 @@ def main(page: ft.Page):
     page.window.min_width = 390
     page.window.min_height = 760
 
+    # Shared Pantry uses a local SQLite database so inventory survives restarts.
+    init_pantry_db()
+
     # Scanner controller owns camera lifecycle + barcode decoding flow.
     scanner_controller = BarcodeScannerController(page)
     # Track which screen should be displayed by render_current_view().
@@ -46,7 +63,10 @@ def main(page: ft.Page):
         "current": "home",
         "product": None,
         "recent_products": [],
-        "pantry_products": [],
+        "pantry_products": get_pantry_items(),
+        "pantry_filter": "Expiring first",
+        "pantry_draft": None,
+        "selected_pantry_item_id": None,
         "ai_profile_cache": {},
         "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None},
         "meal_request_version": 0,
@@ -66,6 +86,10 @@ def main(page: ft.Page):
             "support": "FAQs and contact options",
         },
     }
+
+    view_state["profile"]["pantry_item_count"] = sum(
+        int(item.get("qty") or 0) for item in view_state["pantry_products"]
+    )
 
     def _ai_profile_cache_key(product_name: str, categories: str) -> str:
         return f"{product_name.strip().lower()}|{categories.strip().lower()}"
@@ -110,29 +134,9 @@ def main(page: ft.Page):
         view_state["meal_plan"] = {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None}
 
     def build_meal_inventory() -> list[dict]:
-        """Enrich pantry rows with their latest AI shelf-life profiles."""
+        """Read persistent pantry rows in the meal planner's inventory format."""
 
-        products_by_key = {
-            _recent_product_key(product): product
-            for product in view_state.get("recent_products") or []
-            if isinstance(product, dict)
-        }
-        inventory: list[dict] = []
-        for pantry_item in view_state.get("pantry_products") or []:
-            if not isinstance(pantry_item, dict):
-                continue
-            enriched_item = dict(pantry_item)
-            source_product = products_by_key.get(str(pantry_item.get("key") or ""), {})
-            ai_profile = source_product.get("ai_food_profile") if isinstance(source_product, dict) else None
-            if isinstance(ai_profile, dict):
-                enriched_item["risk"] = str(ai_profile.get("risk") or enriched_item.get("risk") or "Medium Risk")
-                enriched_item["shelf_life"] = str(
-                    ai_profile.get("shelf_life") or enriched_item.get("shelf_life") or "5-10 days"
-                )
-            enriched_item.setdefault("risk", "Medium Risk")
-            enriched_item.setdefault("shelf_life", "5-10 days")
-            inventory.append(enriched_item)
-        return inventory
+        return pantry_items_for_meals(get_pantry_items())
 
     def build_dummy_meal_inventory(demo_number: int) -> list[dict]:
         """Return a rotating sample pantry so repeated clicks create new demos."""
@@ -174,7 +178,7 @@ def main(page: ft.Page):
         ]
 
     def add_product_to_pantry(quantity_value=1) -> None:
-        """Store the selected quantity of the current product, then open Pantry."""
+        """Open the Shared Pantry form prefilled from the current scan result."""
 
         product = view_state.get("product")
         if not isinstance(product, dict):
@@ -185,65 +189,25 @@ def main(page: ft.Page):
         except (TypeError, ValueError):
             quantity = 1
 
-        product_name = str(product.get("product_name") or product.get("generic_name") or "Unknown product").strip()
-        product_key = _recent_product_key(product)
-        pantry_products = list(view_state.get("pantry_products") or [])
-        ai_profile_value = product.get("ai_food_profile")
-        ai_profile = ai_profile_value if isinstance(ai_profile_value, dict) else {}
+        view_state["pantry_draft"] = scanned_product_draft(
+            product,
+            quantity=quantity,
+            source_key=_recent_product_key(product),
+        )
+        view_state["current"] = "pantry_add"
+        render_current_view()
 
-        for pantry_item in pantry_products:
-            if isinstance(pantry_item, dict) and pantry_item.get("key") == product_key:
-                pantry_item["quantity"] = int(pantry_item.get("quantity") or 1) + quantity
-                if ai_profile:
-                    pantry_item["risk"] = str(ai_profile.get("risk") or pantry_item.get("risk") or "Medium Risk")
-                    pantry_item["shelf_life"] = str(
-                        ai_profile.get("shelf_life") or pantry_item.get("shelf_life") or "5-10 days"
-                    )
-                break
-        else:
-            pantry_products.insert(
-                0,
-                {
-                    "key": product_key,
-                    "name": product_name,
-                    "category": str(product.get("categories") or "Food item"),
-                    "quantity": quantity,
-                    "freshness": "Freshly added",
-                    "storage": "Pantry",
-                    "added_at": datetime.now(timezone.utc).isoformat(),
-                    "risk": str(ai_profile.get("risk") or "Medium Risk"),
-                    "shelf_life": str(ai_profile.get("shelf_life") or "5-10 days"),
-                },
-            )
+    def change_pantry_quantity(item_id: int, amount: int) -> None:
+        """Persist a quantity adjustment and refresh Shared Pantry totals."""
 
-        view_state["pantry_products"] = pantry_products
+        update_pantry_quantity(item_id, amount)
+        view_state["pantry_products"] = get_pantry_items()
         invalidate_meal_plan()
         profile = view_state.get("profile")
         if isinstance(profile, dict):
             profile["pantry_item_count"] = sum(
-                int(item.get("quantity") or 0) for item in pantry_products if isinstance(item, dict)
+                int(item.get("qty") or 0) for item in view_state["pantry_products"]
             )
-
-        show_pantry()
-
-    def change_pantry_quantity(product_key: str, amount: int) -> None:
-        """Adjust an existing pantry quantity and remove rows that reach zero."""
-
-        pantry_products = [item for item in view_state.get("pantry_products") or [] if isinstance(item, dict)]
-        updated_products: list[dict] = []
-
-        for pantry_item in pantry_products:
-            if pantry_item.get("key") == product_key:
-                pantry_item["quantity"] = int(pantry_item.get("quantity") or 0) + amount
-                if int(pantry_item["quantity"]) <= 0:
-                    continue
-            updated_products.append(pantry_item)
-
-        view_state["pantry_products"] = updated_products
-        invalidate_meal_plan()
-        profile = view_state.get("profile")
-        if isinstance(profile, dict):
-            profile["pantry_item_count"] = sum(int(item.get("quantity") or 0) for item in updated_products)
 
         if view_state.get("current") == "pantry":
             render_current_view()
@@ -474,6 +438,20 @@ def main(page: ft.Page):
             page.update()
             return
 
+        if view_state["current"] == "pantry_add":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_add_pantry_view())
+            page.update()
+            return
+
+        if view_state["current"] == "pantry_item":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_pantry_item_view())
+            page.update()
+            return
+
         if view_state["current"] == "meals":
             scanner_controller.stop_camera()
             page.clean()
@@ -513,8 +491,68 @@ def main(page: ft.Page):
     def show_pantry(_=None):
         """Navigate to the pantry screen from button/tap handlers."""
 
+        view_state["pantry_products"] = get_pantry_items()
         view_state["current"] = "pantry"
         render_current_view()
+
+    def show_manual_pantry_add(_=None):
+        """Open the same Shared Pantry form used by scanned products."""
+
+        view_state["pantry_draft"] = manual_pantry_draft()
+        view_state["current"] = "pantry_add"
+        render_current_view()
+
+    def save_shared_pantry_item(item: dict) -> None:
+        """Persist a completed Shared Pantry form and refresh dependent views."""
+
+        save_pantry_item(item)
+        view_state["pantry_products"] = get_pantry_items()
+        view_state["pantry_draft"] = None
+        invalidate_meal_plan()
+        profile = view_state.get("profile")
+        if isinstance(profile, dict):
+            profile["pantry_item_count"] = sum(
+                int(row.get("qty") or 0) for row in view_state["pantry_products"]
+            )
+        show_message(f"{item.get('name', 'Item')} saved to Shared Pantry.")
+        show_pantry()
+
+    def show_pantry_item(item_id: int) -> None:
+        view_state["selected_pantry_item_id"] = item_id
+        view_state["current"] = "pantry_item"
+        render_current_view()
+
+    def save_pantry_note(item_id: int, note: str) -> None:
+        update_pantry_note(item_id, note)
+        show_message("Family note saved.")
+        render_current_view()
+
+    def discard_shared_pantry_item(item_id: int) -> None:
+        discard_pantry_item(item_id)
+        view_state["pantry_products"] = get_pantry_items()
+        invalidate_meal_plan()
+        show_message("Item removed and logged as composted/discarded.")
+        show_pantry()
+
+    def change_pantry_filter(value: str) -> None:
+        view_state["pantry_filter"] = value
+        render_current_view()
+
+    def show_message(message: str) -> None:
+        """Show brief feedback for pantry save/share/donate actions."""
+
+        page.overlay.append(
+            ft.SnackBar(content=ft.Text(message, color="#FFFFFF"), bgcolor=ThemeColors.GREEN_TEXT, open=True)
+        )
+        page.update()
+
+    def share_pantry_item(item: dict) -> None:
+        safety = str(item.get("safety_class") or "sealed_packaged")
+        destination = "your Circle only" if safety == "homemade_or_opened" else "your Circle or Community"
+        show_message(f"{item.get('name', 'Item')} is ready to share with {destination}.")
+
+    def donate_pantry_item(item: dict) -> None:
+        show_message(f"{item.get('name', 'Item')} is eligible for food-bank donation.")
 
     def show_meal_planner(_=None):
         """Open the planner with the user's current pantry inventory."""
@@ -727,7 +765,7 @@ def main(page: ft.Page):
         )
 
     def build_pantry_view() -> ft.Container:
-        # Pantry screen mirrors the app visual language and bottom navigation.
+        # Shared Pantry reads from SQLite and keeps the app's responsive shell.
         metrics = get_layout_metrics()
         return build_pantry_shell(
             metrics=metrics,
@@ -736,8 +774,51 @@ def main(page: ft.Page):
             on_me_click=show_me,
             on_meal_planner_click=show_meal_planner,
             on_dummy_meal_planner_click=show_dummy_meal_planner,
-            pantry_products=view_state.get("pantry_products") or [],
+            pantry_products=get_pantry_items(),
             on_quantity_change=change_pantry_quantity,
+            on_add_manual_click=show_manual_pantry_add,
+            on_item_options_click=show_pantry_item,
+            selected_filter=str(view_state.get("pantry_filter") or "Expiring first"),
+            on_filter_change=change_pantry_filter,
+        )
+
+    def build_add_pantry_view() -> ft.Container:
+        """Build the manual/scanned Shared Pantry form from its current draft."""
+
+        metrics = get_layout_metrics()
+        draft = view_state.get("pantry_draft")
+        if not isinstance(draft, dict):
+            draft = manual_pantry_draft()
+            view_state["pantry_draft"] = draft
+        return build_add_pantry_shell(
+            metrics=metrics,
+            draft=draft,
+            on_save=save_shared_pantry_item,
+            on_cancel=show_pantry,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_me_click=show_me,
+        )
+
+    def build_pantry_item_view() -> ft.Container:
+        """Build options for the selected item, falling back if it was removed."""
+
+        item_id = int(view_state.get("selected_pantry_item_id") or 0)
+        item = get_pantry_item(item_id)
+        if item is None:
+            return build_pantry_view()
+        return build_pantry_item_options_shell(
+            metrics=get_layout_metrics(),
+            item=item,
+            on_back_click=show_pantry,
+            on_save_note=save_pantry_note,
+            on_discard=discard_shared_pantry_item,
+            on_use=show_meal_planner,
+            on_share=share_pantry_item,
+            on_donate=donate_pantry_item,
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_me_click=show_me,
         )
 
     def build_meal_plan_view() -> ft.Container:
