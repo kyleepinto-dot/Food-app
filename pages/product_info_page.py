@@ -714,7 +714,7 @@ def build_product_info_shell(
                 quantity_field,
                 ft.Button(
                     expand=True,
-                    content=ft.Text("Add To Pantry"),
+                    content=ft.Text("Add to Shared Pantry"),
                     on_click=lambda _: on_add_to_pantry(quantity_field.value),
                     style=ft.ButtonStyle(
                         bgcolor="#2E5D4E",
