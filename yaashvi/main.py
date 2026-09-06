@@ -871,8 +871,6 @@ def main(page: ft.Page):
         return ft.Container(
             padding=ft.Padding(28, 22, 28, 32),
             content=ft.Column(width=760, spacing=14, controls=[
-                ft.Container(on_click=lambda e: app.navigate("my_pantry"),
-                             content=ft.Text("← Back to Shared Pantry", color=GREEN, size=14)),
                 header, type_card, form_card, err,
                 ft.Row(alignment=ft.MainAxisAlignment.END,
                        controls=[primary_button("Share it", submit)]),
@@ -963,7 +961,7 @@ def main(page: ft.Page):
             step1_controls.append(ft.Text("You have no sealed, in-date items to "
                                           "donate right now.", size=13, color=SECONDARY))
         step1 = ft.Container(
-            expand=True, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
+            width=300, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
             border_radius=RADIUS_CARD, padding=18,
             content=ft.Column(spacing=12, controls=step1_controls),
         )
@@ -985,7 +983,7 @@ def main(page: ft.Page):
                 ]),
             ))
         step2 = ft.Container(
-            expand=True, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
+            width=300, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
             border_radius=RADIUS_CARD, padding=18,
             content=ft.Column(spacing=12, controls=step2_controls),
         )
@@ -1052,7 +1050,7 @@ def main(page: ft.Page):
             step3_controls.append(ft.Text("Pick an item and a food bank to get your "
                                           "drop-off pass.", size=13, color=SECONDARY))
         step3 = ft.Container(
-            expand=True, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
+            width=300, bgcolor=CARD, border=ft.border.all(1, CARD_BORDER),
             border_radius=RADIUS_CARD, padding=18,
             content=ft.Column(spacing=12, controls=step3_controls),
         )
@@ -1072,8 +1070,6 @@ def main(page: ft.Page):
         return ft.Container(
             padding=ft.Padding(28, 22, 28, 32),
             content=ft.Column(spacing=16, controls=[
-                ft.Container(on_click=lambda e: app.navigate("my_pantry"),
-                             content=ft.Text("← Back to Shared Pantry", color=GREEN, size=14)),
                 header,
                 ft.Row(spacing=16, vertical_alignment=ft.CrossAxisAlignment.START,
                        wrap=True, controls=[step1, step2, step3]),
@@ -1168,10 +1164,21 @@ def main(page: ft.Page):
         )
         invite_err = ft.Text("", size=13, color="#B5402C")
 
+        def looks_like_contact(text):
+            """A light check that it's a real-ish email OR phone number."""
+            t = text.strip()
+            if "@" in t and "." in t.split("@")[-1] and len(t) >= 5:
+                return True                          # e.g. name@example.com
+            digits = [ch for ch in t if ch.isdigit()]
+            return len(digits) >= 7                  # a phone number has 7+ digits
+
         def send_invite(e):
             contact = (invite_input.value or "").strip()
             if not contact:
                 invite_err.value = "Type a phone number or email first."
+                invite_err.update(); return
+            if not looks_like_contact(contact):
+                invite_err.value = "That doesn't look like a valid email or phone number."
                 invite_err.update(); return
             code = queries.create_invite(circle["id"], contact, app.user_id)
             toast(f"Invite created for {contact} — code {code}")
@@ -1303,13 +1310,9 @@ def main(page: ft.Page):
 
         return ft.Container(
             padding=ft.Padding(28, 22, 28, 32),
-            content=ft.Column(spacing=14, controls=[
-                ft.Container(on_click=lambda e: app.navigate("my_pantry"),
-                             content=ft.Text("← Back to Shared Pantry", color=GREEN, size=14)),
-                ft.Row(spacing=20, wrap=True,
-                       vertical_alignment=ft.CrossAxisAlignment.START,
-                       controls=[left, right]),
-            ]),
+            content=ft.Row(spacing=20, wrap=True,
+                           vertical_alignment=ft.CrossAxisAlignment.START,
+                           controls=[left, right]),
         )
 
     # ----- "Coming soon" page for MY screens that aren't built yet --------
@@ -1370,11 +1373,7 @@ def main(page: ft.Page):
             content=ft.Column(
                 width=720, spacing=14,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[
-                    ft.Container(on_click=lambda e: app.navigate("my_pantry"),
-                                 content=ft.Text("← Back to Shared Pantry", color=GREEN, size=14)),
-                    box,
-                ],
+                controls=[box],
             ),
             alignment=ft.alignment.top_center,
         )
@@ -1477,8 +1476,6 @@ def main(page: ft.Page):
                 width=980, spacing=16,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    ft.Container(on_click=lambda e: app.navigate("my_pantry"),
-                                 content=ft.Text("\u2190 Back to Shared Pantry", color=GREEN, size=14)),
                     header_card, stats_row, activity_card, badges_card,
                 ]),
             alignment=ft.alignment.top_center,
