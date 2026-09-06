@@ -32,13 +32,11 @@ class ThemeColors:
     CARD_PADDING = 12
     SECTION_SPACING = 12
 
-    # Text colors by hierarchy.
-    # PRIMARY: main content, SECONDARY: supporting copy,
-    # TERTIARY/INACTIVE: helper text and non-selected nav items.
-    TEXT_PRIMARY = "#111111"
-    TEXT_SECONDARY = "#2A2A2A"
-    TEXT_TERTIARY = "#303030"
-    TEXT_INACTIVE = "#6E6E6E"
+    # Keep all text hierarchy levels black for maximum readability.
+    TEXT_PRIMARY = "#000000"
+    TEXT_SECONDARY = "#000000"
+    TEXT_TERTIARY = "#000000"
+    TEXT_INACTIVE = "#000000"
 
     # Component surfaces and accents used by cards, tracker, and preview fallback.
     CARD_BACKGROUND = "#FFF0BF"

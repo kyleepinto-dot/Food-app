@@ -242,7 +242,7 @@ def _urgency(best_by: str) -> tuple[int, str, str, str]:
 
 def build_pantry_shell(
     metrics: dict, on_home_click, on_scan_click, on_me_click,
-    on_meal_planner_click, on_dummy_meal_planner_click,
+    on_meal_planner_click,
     pantry_products: list[dict], on_quantity_change, on_add_manual_click,
     on_item_options_click, selected_filter: str = "Expiring first", on_filter_change=None,
 ) -> ft.Container:
@@ -316,11 +316,9 @@ def build_pantry_shell(
         ])),
         ft.Row(wrap=True, spacing=6, run_spacing=6, controls=[filter_chip(value) for value in ["Expiring first", "All", "Fridge", "Freezer", "Shelf"]]),
         ft.Column(spacing=9, controls=rows),
-        ft.Row(spacing=8, controls=[
+        ft.Row(controls=[
             ft.Button(expand=True, content=ft.Text("Meal Planner"), on_click=on_meal_planner_click,
                       style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color="#FFFFFF")),
-            ft.Button(expand=True, content=ft.Text("Demo Planner"), on_click=on_dummy_meal_planner_click,
-                      style=ft.ButtonStyle(bgcolor="#FFFFFF", color=ThemeColors.GREEN_TEXT)),
         ]),
         ft.Container(bgcolor="#F7E9C8", border_radius=14, padding=12,
                      content=ft.Text("💡 Sealed, in-date food can be donated. Produce can be shared; opened or homemade food should only be shared with your circle.", size=12, color="#7A570E")),
