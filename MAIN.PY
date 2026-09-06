@@ -1,6 +1,5 @@
 import flet as ft
 import asyncio
-from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
@@ -43,6 +42,19 @@ def main(page: ft.Page):
     page.title = "PantryIQ Connect"
     page.padding = 8
     page.bgcolor = ThemeColors.PAGE_BACKGROUND
+    # Flet's Material defaults render Text controls without an explicit color
+    # with gray surface tones. Set both surface text roles and the default body
+    # style to black so every inherited label, heading, and field value is black.
+    page.theme_mode = ft.ThemeMode.LIGHT
+    page.theme = ft.Theme(
+        color_scheme=ft.ColorScheme(
+            on_surface=ft.Colors.BLACK,
+            on_surface_variant=ft.Colors.BLACK,
+        ),
+        text_theme=ft.TextTheme(
+            body_medium=ft.TextStyle(color=ft.Colors.BLACK),
+        ),
+    )
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
 
@@ -70,9 +82,7 @@ def main(page: ft.Page):
         "ai_profile_cache": {},
         "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None},
         "meal_request_version": 0,
-        "meal_demo_number": 0,
         "meal_inventory": [],
-        "meal_is_dummy": False,
         "profile": {
             "name": "Jamie Carter",
             "membership": "Community Member",
@@ -137,45 +147,6 @@ def main(page: ft.Page):
         """Read persistent pantry rows in the meal planner's inventory format."""
 
         return pantry_items_for_meals(get_pantry_items())
-
-    def build_dummy_meal_inventory(demo_number: int) -> list[dict]:
-        """Return a rotating sample pantry so repeated clicks create new demos."""
-
-        demo_sets = [
-            [
-                ("Baby spinach", "Produce", 1, "1 day", "High Risk"),
-                ("Chicken breast", "Meat", 2, "2 days", "High Risk"),
-                ("Greek yogurt", "Dairy", 1, "4 days", "Medium Risk"),
-                ("Brown rice", "Whole grain", 1, "3 months", "Low Risk"),
-            ],
-            [
-                ("Ripe tomatoes", "Produce", 4, "1 day", "High Risk"),
-                ("Black beans", "Protein", 1, "5 days", "Medium Risk"),
-                ("Corn tortillas", "Whole grain", 6, "8 days", "Medium Risk"),
-                ("Frozen corn", "Vegetable", 1, "2 months", "Low Risk"),
-            ],
-            [
-                ("Fresh mushrooms", "Produce", 1, "2 days", "High Risk"),
-                ("Firm tofu", "Plant protein", 1, "4 days", "Medium Risk"),
-                ("Broccoli", "Vegetable", 2, "6 days", "Medium Risk"),
-                ("Whole-wheat noodles", "Whole grain", 1, "4 months", "Low Risk"),
-            ],
-        ]
-        selected_set = demo_sets[(demo_number - 1) % len(demo_sets)]
-        return [
-            {
-                "key": f"demo:{demo_number}:{index}",
-                "name": name,
-                "category": category,
-                "quantity": quantity,
-                "freshness": "Demo item",
-                "storage": "Demo pantry",
-                "added_at": datetime.now(timezone.utc).isoformat(),
-                "shelf_life": shelf_life,
-                "risk": risk,
-            }
-            for index, (name, category, quantity, shelf_life, risk) in enumerate(selected_set)
-        ]
 
     def add_product_to_pantry(quantity_value=1) -> None:
         """Open the Shared Pantry form prefilled from the current scan result."""
@@ -311,8 +282,29 @@ def main(page: ft.Page):
         if view_state.get("current") == "product" and view_state.get("product") is product:
             render_current_view()
 
+    async def hydrate_meal_image_async(image_index: int, image_url: str, request_version: int):
+        """Generate one meal photo and reveal it without waiting for the batch."""
+
+        is_warmed = await asyncio.to_thread(warm_image_url, image_url)
+        if not is_warmed or request_version != view_state.get("meal_request_version"):
+            return
+
+        meal_plan = view_state.get("meal_plan") or {}
+        image_urls = list(meal_plan.get("image_urls") or [])
+        suggestions = meal_plan.get("suggestions") or []
+        if image_index >= len(suggestions):
+            return
+        if len(image_urls) < len(suggestions):
+            image_urls.extend([""] * (len(suggestions) - len(image_urls)))
+
+        image_urls[image_index] = image_url
+        meal_plan["image_urls"] = image_urls
+        view_state["meal_plan"] = meal_plan
+        if view_state.get("current") == "meals":
+            render_current_view()
+
     async def hydrate_meal_plan_async(inventory: list[dict], request_version: int):
-        """Generate several meals, then hydrate their AI photos concurrently."""
+        """Generate meals, then hydrate each AI photo concurrently."""
 
         suggestions = await asyncio.to_thread(fetch_ai_meal_suggestions, inventory)
         if request_version != view_state.get("meal_request_version"):
@@ -321,13 +313,14 @@ def main(page: ft.Page):
         meal_plan = view_state.get("meal_plan") or {}
         meal_plan["suggestions"] = suggestions
         meal_plan["status"] = "ready" if suggestions else "idle"
-        meal_plan["image_urls"] = []
+        meal_plan["image_urls"] = [""] * len(suggestions)
         view_state["meal_plan"] = meal_plan
         if view_state.get("current") == "meals":
             render_current_view()
 
-        if not suggestions:
-            return
+        # The hosted image endpoint generates photos on first request. Start
+        # every request concurrently, but publish each URL only after that
+        # individual photo is ready so Flet never receives a premature URL.
         image_urls = [
             build_ai_meal_image_url(
                 str(suggestion.get("title") or "Healthy pantry meal"),
@@ -339,15 +332,9 @@ def main(page: ft.Page):
             ) or ""
             for suggestion in suggestions
         ]
-        warm_results = await asyncio.gather(
-            *(asyncio.to_thread(warm_image_url, url) if url else asyncio.sleep(0, result=False) for url in image_urls)
-        )
-        if request_version != view_state.get("meal_request_version"):
-            return
-
-        meal_plan["image_urls"] = [url if warmed else "" for url, warmed in zip(image_urls, warm_results)]
-        if view_state.get("current") == "meals":
-            render_current_view()
+        for image_index, image_url in enumerate(image_urls):
+            if image_url:
+                page.run_task(hydrate_meal_image_async, image_index, image_url, request_version)
 
     def get_layout_metrics() -> dict:
         """Return responsive measurements consumed by both screen builders.
@@ -560,18 +547,6 @@ def main(page: ft.Page):
         invalidate_meal_plan()
         inventory = build_meal_inventory()
         view_state["meal_inventory"] = inventory
-        view_state["meal_is_dummy"] = False
-        start_meal_request(inventory)
-
-    def show_dummy_meal_planner(_=None):
-        """Open a new rotating dummy pantry page on every button click."""
-
-        invalidate_meal_plan()
-        demo_number = int(view_state.get("meal_demo_number") or 0) + 1
-        view_state["meal_demo_number"] = demo_number
-        inventory = build_dummy_meal_inventory(demo_number)
-        view_state["meal_inventory"] = inventory
-        view_state["meal_is_dummy"] = True
         start_meal_request(inventory)
 
     def start_meal_request(inventory: list[dict]) -> None:
@@ -773,7 +748,6 @@ def main(page: ft.Page):
             on_scan_click=show_scan,
             on_me_click=show_me,
             on_meal_planner_click=show_meal_planner,
-            on_dummy_meal_planner_click=show_dummy_meal_planner,
             pantry_products=get_pantry_items(),
             on_quantity_change=change_pantry_quantity,
             on_add_manual_click=show_manual_pantry_add,
@@ -834,7 +808,6 @@ def main(page: ft.Page):
             on_me_click=show_me,
             ranked_items=rank_pantry_items(inventory),
             meal_state=view_state.get("meal_plan") or {},
-            demo_number=int(view_state.get("meal_demo_number") or 1) if view_state.get("meal_is_dummy") else 0,
             on_meal_click=select_meal_suggestion,
             on_back_to_list_click=show_meal_suggestion_list,
             on_refresh_click=refresh_meal_plan,

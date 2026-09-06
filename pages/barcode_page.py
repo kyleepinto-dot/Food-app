@@ -535,7 +535,7 @@ def build_scan_shell(
         value="No barcode scanned yet",
         size=16,
         weight=ft.FontWeight.BOLD,
-        color="#0A1726",
+        color="#000000",
     )
 
     camera = fc.Camera(preview_enabled=True, expand=True) if camera_is_supported else None
@@ -562,7 +562,7 @@ def build_scan_shell(
                 ft.Button(
                     content=ft.Text("Stop Camera"),
                     on_click=on_stop_camera,
-                    style=ft.ButtonStyle(bgcolor="#ECEFF3", color="#101010"),
+                    style=ft.ButtonStyle(bgcolor="#ECEFF3", color="#000000"),
                 ),
                 capture_button,
             ],
@@ -588,7 +588,7 @@ def build_scan_shell(
             alignment=ft.Alignment(0, 0),
             content=ft.Text(
                 "Camera preview is supported on Web, Android, and iOS.",
-                color="#3E4758",
+                color="#000000",
                 size=16,
                 text_align=ft.TextAlign.CENTER,
             ),
@@ -613,7 +613,7 @@ def build_scan_shell(
                     ft.Text(
                         "Looking up product details...",
                         size=14,
-                        color="#1F2A3A",
+                        color="#000000",
                         weight=ft.FontWeight.W_600,
                     ),
                 ],
@@ -677,7 +677,7 @@ def build_scan_shell(
         border_color="#D4DCE5",
         focused_border_color=ThemeColors.BRAND_PRIMARY,
         bgcolor="#FFFFFF",
-        color="#152238",
+        color="#000000",
     )
 
     manual_header: ft.Control
@@ -692,12 +692,12 @@ def build_scan_shell(
                             "Manually Enter Product Name or Barcode",
                             size=24 if metrics["is_desktop"] else 18,
                             weight=ft.FontWeight.BOLD,
-                            color="#0A1A12",
+                            color="#000000",
                         ),
                         ft.Text(
                             "Type product name or barcode to continue.",
                             size=14,
-                            color="#2E3747",
+                            color="#000000",
                         ),
                     ],
                 ),
@@ -711,12 +711,12 @@ def build_scan_shell(
                     "Manually Enter Product Name or Barcode",
                     size=18,
                     weight=ft.FontWeight.BOLD,
-                    color="#0A1A12",
+                    color="#000000",
                 ),
                 ft.Text(
                     "Type product name or barcode to continue.",
                     size=14,
-                    color="#2E3747",
+                    color="#000000",
                 ),
             ],
         )
@@ -793,7 +793,7 @@ def build_scan_shell(
                     "Adding products helps you track freshness, reduce food waste, and share with others!",
                     expand=True,
                     size=14,
-                    color="#213125",
+                    color="#000000",
                     weight=ft.FontWeight.W_600,
                 ),
             ],
@@ -979,12 +979,12 @@ def build_scan_shell(
                                 "Scan Product Barcode",
                                 size=26 if metrics["is_desktop"] else 20,
                                 weight=ft.FontWeight.BOLD,
-                                color="#0A1A12",
+                                color="#000000",
                             ),
                             ft.Text(
                                 "Scan to automatically get shelf life info or enter the product name manually.",
                                 size=15,
-                                color="#3D4658",
+                                color="#000000",
                             ),
                         ],
                     ),

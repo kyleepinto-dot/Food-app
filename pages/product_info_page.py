@@ -331,7 +331,7 @@ def _fattom_grid(metrics: dict, fattom: dict) -> ft.Container:
                 controls=[
                     ft.Text(title, size=11, color=ThemeColors.GREEN_TEXT, weight=ft.FontWeight.W_600),
                     ft.Text(icon, size=18),
-                    ft.Text(value, size=11, color="#263040", weight=ft.FontWeight.BOLD),
+                    ft.Text(value, size=11, color="#000000", weight=ft.FontWeight.BOLD),
                 ],
             ),
         )
@@ -380,10 +380,10 @@ def build_product_info_shell(
         profile_status_color = "#1F5A36"
     elif ai_profile_status == "ready_local":
         profile_status_text = "Profile source: Local smart profile (remote AI unavailable)"
-        profile_status_color = "#2A2A2A"
+        profile_status_color = "#000000"
     elif ai_profile_status == "pending":
         profile_status_text = "Profile source: AI generating... (temporary fallback shown)"
-        profile_status_color = "#2A2A2A"
+        profile_status_color = "#000000"
     else:
         profile_status_text = "Profile source: Fallback heuristic (AI unavailable)"
         profile_status_color = "#8A3B24"

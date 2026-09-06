@@ -55,8 +55,10 @@ def build_ai_meal_image_url(meal_name: str, ingredients: list[str]) -> str | Non
     params = urllib.parse.urlencode(
         {
             "model": "flux",
-            "width": 1024,
-            "height": 768,
+            # The planner displays small thumbnails and a short detail banner;
+            # a smaller source image generates and transfers much faster.
+            "width": 640,
+            "height": 480,
             "seed": seed,
             "nologo": "true",
         }

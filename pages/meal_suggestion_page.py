@@ -162,7 +162,6 @@ def build_meal_suggestion_shell(
     on_me_click,
     ranked_items: list[dict],
     meal_state: dict,
-    demo_number: int,
     on_meal_click,
     on_back_to_list_click,
     on_refresh_click,
@@ -319,18 +318,7 @@ def build_meal_suggestion_shell(
             content=ft.Column(
                 spacing=7,
                 controls=[
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        controls=[
-                            ft.Text("Expiring first to last", size=17, weight=ft.FontWeight.BOLD),
-                            ft.Container(
-                                bgcolor="#FFFFFF",
-                                border_radius=10,
-                                padding=ft.Padding(left=8, top=5, right=8, bottom=5),
-                                content=ft.Text(f"Dummy page {demo_number}", size=11, weight=ft.FontWeight.BOLD),
-                            ) if demo_number > 0 else ft.Container(),
-                        ],
-                    ),
+                    ft.Text("Expiring first to last", size=17, weight=ft.FontWeight.BOLD),
                     ft.Text(
                         "Foods are sorted from the item to use soonest to the item that lasts longest.",
                         size=12,
