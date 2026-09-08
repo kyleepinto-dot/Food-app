@@ -25,6 +25,17 @@ from pages.pantry_page import (
     update_pantry_quantity,
 )
 from pages.me_page import build_me_shell
+
+# --- Yaashvi's screens + multi-user backend, integrated into the single app ---
+import db
+import queries
+import session
+from pages.pantry_page import set_current_user
+from pages.welcome_page import build_welcome_shell
+from pages.impact_page import build_impact_shell
+from pages.circle_page import build_circle_shell
+from pages.share_page import build_share_shell
+from pages.donate_page import build_donate_shell, build_dashboard_shell
 from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
 from pages.product_info_page import build_product_info_shell
@@ -90,6 +101,15 @@ def main(page: ft.Page):
     view_state["profile"]["pantry_item_count"] = sum(
         int(item.get("qty") or 0) for item in view_state["pantry_products"]
     )
+
+    # Multi-user: remember who is logged in (restored from a saved session), and
+    # hold the Donate flow's current selection. Pantry queries are scoped to the
+    # logged-in user via pantry_page.set_current_user().
+    view_state["user_id"] = session.load()
+    view_state["donate_sel"] = {"item_id": None, "bank_id": None, "reason": None, "pass": None}
+    if view_state["user_id"]:
+        set_current_user(view_state["user_id"])
+        view_state["pantry_products"] = get_pantry_items()
 
     def _ai_profile_cache_key(product_name: str, categories: str) -> str:
         return f"{product_name.strip().lower()}|{categories.strip().lower()}"
@@ -410,6 +430,28 @@ def main(page: ft.Page):
         cleanup logic and makes lifecycle behavior easier to reason about.
         """
 
+        # Login gate: with no signed-in user, the Welcome screen owns the page.
+        if not view_state.get("user_id"):
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_welcome_view())
+            page.update()
+            return
+
+        # Yaashvi's integrated screens (each reads its data from view_state).
+        if view_state["current"] in ("circle", "share", "donate", "dashboard", "impact"):
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add({
+                "circle": build_circle_view,
+                "share": build_share_view,
+                "donate": build_donate_view,
+                "dashboard": build_dashboard_view,
+                "impact": build_impact_view,
+            }[view_state["current"]]())
+            page.update()
+            return
+
         # Centralized rendering keeps navigation predictable and avoids
         # stale controls left on the page.
         if view_state["current"] == "scan":
@@ -462,7 +504,7 @@ def main(page: ft.Page):
         if view_state["current"] == "me":
             scanner_controller.stop_camera()
             page.clean()
-            page.add(build_me_view())
+            page.add(build_impact_view())   # Me tab = your Impact / profile
             page.update()
             return
 
@@ -547,12 +589,24 @@ def main(page: ft.Page):
         page.update()
 
     def share_pantry_item(item: dict) -> None:
-        safety = str(item.get("safety_class") or "sealed_packaged")
-        destination = "your Circle only" if safety == "homemade_or_opened" else "your Circle or Community"
-        show_message(f"{item.get('name', 'Item')} is ready to share with {destination}.")
+        """Open the real Share form, locked to this pantry item's food type."""
+        view_state["share_item_id"] = item.get("id")
+        view_state["current"] = "share"
+        render_current_view()
 
     def donate_pantry_item(item: dict) -> None:
-        show_message(f"{item.get('name', 'Item')} is eligible for food-bank donation.")
+        """Open the real Donate flow, preselecting this item if it's eligible."""
+        item_id = item.get("id")
+        preselect, reason = None, None
+        it = db.get_item(item_id) if item_id else None
+        if it is not None:
+            if db.can_donate(it["safety_class"], it["best_by"]):
+                preselect = item_id
+            else:
+                reason = db.donate_ineligible_reason(it["safety_class"], it["best_by"])
+        view_state["donate_sel"] = {"item_id": preselect, "bank_id": None, "reason": reason, "pass": None}
+        view_state["current"] = "donate"
+        render_current_view()
 
     def show_meal_planner(_=None):
         """Open the planner with the user's current pantry inventory."""
@@ -840,6 +894,198 @@ def main(page: ft.Page):
             on_refresh_click=refresh_meal_plan,
         )
 
+    # ─── Auth (login gate) ────────────────────────────────────────────────
+    def _enter_app(uid: int) -> None:
+        view_state["user_id"] = uid
+        session.save(uid)
+        set_current_user(uid)
+        view_state["pantry_products"] = get_pantry_items()
+        view_state["welcome_error"] = ""
+        view_state["current"] = "pantry"
+        render_current_view()
+
+    def welcome_submit(values: dict) -> None:
+        try:
+            if values["mode"] == "create":
+                uid = db.create_account(values["name"], values["email"], values["password"])
+            else:
+                row = db.check_login(values["email"], values["password"])
+                if row is None:
+                    view_state["welcome_error"] = "That email or password isn't right."
+                    render_current_view()
+                    return
+                uid = row["id"]
+        except ValueError as ex:
+            view_state["welcome_error"] = str(ex)
+            render_current_view()
+            return
+        _enter_app(uid)
+
+    def welcome_switch() -> None:
+        current = view_state.get("welcome_mode", "signin")
+        view_state["welcome_mode"] = "signin" if current == "create" else "create"
+        view_state["welcome_error"] = ""
+        render_current_view()
+
+    def do_logout(_=None) -> None:
+        session.clear()
+        view_state["user_id"] = None
+        view_state["welcome_mode"] = "signin"
+        render_current_view()
+
+    # ─── Navigation to the integrated screens ─────────────────────────────
+    def show_circle(_=None) -> None:
+        view_state["current"] = "circle"
+        render_current_view()
+
+    def show_donate(_=None) -> None:
+        view_state["donate_sel"] = {"item_id": None, "bank_id": None, "reason": None, "pass": None}
+        view_state["current"] = "donate"
+        render_current_view()
+
+    def show_dashboard(bank_id) -> None:
+        view_state["dashboard_bank_id"] = bank_id
+        view_state["current"] = "dashboard"
+        render_current_view()
+
+    # ─── View builders for the integrated screens ─────────────────────────
+    def build_welcome_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        return build_welcome_shell(
+            metrics, view_state.get("welcome_mode", "signin"),
+            on_submit=welcome_submit, on_switch=welcome_switch,
+            error=view_state.get("welcome_error", ""),
+        )
+
+    def build_impact_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        uid = view_state["user_id"]
+        user = db.get_user(uid)
+        name = user["name"] if user else "Member"
+        since = "new member"
+        try:
+            if "joined_on" in user.keys() and user["joined_on"]:
+                since = "member since " + str(user["joined_on"])
+        except Exception:
+            pass
+        profile = {"name": name, "since_text": since, "circle_size": queries.get_circle_size(uid)}
+        stats = queries.get_impact(uid)
+        activity = queries.get_recent_activity(uid)
+        return build_impact_shell(
+            metrics, profile, stats, activity,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me,
+            on_logout=do_logout, on_circle=show_circle,
+        )
+
+    def build_circle_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        uid = view_state["user_id"]
+        user = db.get_user(uid)
+        circle = queries.get_or_create_circle(uid, user["name"] if user else "Member")
+        members = [dict(m) for m in queries.get_circle_members(circle["id"])]
+        pending = [dict(p) for p in queries.get_pending_invites(circle["id"])]
+
+        def on_send_invite(contact: str) -> None:
+            queries.create_invite(circle["id"], contact, uid)
+            show_message(f"Invite created for {contact}.")
+            render_current_view()
+
+        return build_circle_shell(
+            metrics, circle["name"] if circle else "My Circle", members, pending,
+            on_send_invite=on_send_invite,
+            on_copy_link=lambda: show_message("Circle invite link copied."),
+            on_resend=lambda code: show_message(f"Invite {code} re-sent."),
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_me,
+        )
+
+    def build_share_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        item_id = view_state.get("share_item_id")
+        it = db.get_item(item_id) if item_id else None
+        if it is not None:
+            qty = it["qty"]
+            draft = {"locked": True,
+                     "title": it["name"] + (f" ×{qty}" if qty and qty > 1 else ""),
+                     "safety_class": it["safety_class"] or "homemade_or_opened"}
+        else:
+            draft = {"locked": False, "title": "", "safety_class": "homemade_or_opened"}
+
+        def on_share(values: dict) -> None:
+            db.create_share(shared_by=view_state["user_id"], item_id=item_id,
+                            title=values["title"], safety_class=values["safety_class"],
+                            best_by=values["best_by"], pickup_window=values["pickup_window"])
+            show_message(f"Shared \"{values['title']}\".")
+            view_state["share_item_id"] = None
+            show_pantry()
+
+        def on_cancel(_=None) -> None:
+            view_state["share_item_id"] = None
+            show_pantry()
+
+        return build_share_shell(
+            metrics, draft, on_share=on_share, on_cancel=on_cancel,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_pantry,
+        )
+
+    def build_donate_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        uid = view_state["user_id"]
+        sel = view_state["donate_sel"]
+        eligible = [dict(i) for i in db.get_donatable_items(uid)]
+        banks = [dict(b) for b in queries.get_food_banks()]
+        data = {"eligible": eligible, "banks": banks,
+                "selected_item_id": sel.get("item_id"), "selected_bank_id": sel.get("bank_id"),
+                "reason": sel.get("reason"), "pass": sel.get("pass")}
+
+        def on_pick_item(i):
+            sel["item_id"] = i; sel["pass"] = None; render_current_view()
+
+        def on_pick_bank(i):
+            sel["bank_id"] = i; sel["pass"] = None; render_current_view()
+
+        def on_confirm():
+            item = next((x for x in eligible if x["id"] == sel["item_id"]), None)
+            bank = next((b for b in banks if b["id"] == sel["bank_id"]), None)
+            if not item or not bank:
+                return
+            did = db.create_donation(uid, item["id"], bank["id"], dropoff_window=bank.get("schedule"))
+            qty = item.get("qty")
+            sel["pass"] = {"id": did, "bank_id": bank["id"], "bank": bank["name"],
+                           "window": bank.get("schedule"),
+                           "title": item["name"] + (f" ×{qty}" if qty and qty > 1 else "")}
+            show_message(f"Drop-off pass ready — Donation #{int(did):04d}")
+            render_current_view()
+
+        return build_donate_shell(
+            metrics, data, on_pick_item, on_pick_bank, on_confirm, show_dashboard,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_pantry,
+        )
+
+    def build_dashboard_view() -> ft.Container:
+        metrics = get_layout_metrics()
+        bank_id = view_state.get("dashboard_bank_id")
+        bank_row = queries.get_food_bank(bank_id)
+        if bank_row is None:
+            view_state["current"] = "donate"
+            return build_donate_view()
+        incoming = [dict(d) for d in queries.get_incoming_donations(bank_id)]
+
+        def on_check_in(i):
+            queries.check_in_donation(i)
+            show_message("Donation checked in.")
+            render_current_view()
+
+        return build_dashboard_shell(
+            metrics, dict(bank_row), incoming, on_check_in=on_check_in,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me,
+            on_back_click=lambda _=None: show_donate(),
+        )
+
     def build_me_view() -> ft.Container:
         # Account/profile screen reuses shared shell styling and nav.
         metrics = get_layout_metrics()
@@ -860,7 +1106,11 @@ def main(page: ft.Page):
         scanner_controller.append_debug("page_error", str(getattr(e, "data", e)))
 
     page.on_error = handle_page_error
-    show_home()
+    # Start on the pantry if a saved session logged us in; otherwise the login
+    # gate in render_current_view() shows the Welcome screen.
+    if view_state.get("user_id"):
+        view_state["current"] = "pantry"
+    render_current_view()
 
 
 ft.run(main)

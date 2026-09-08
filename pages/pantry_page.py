@@ -10,9 +10,20 @@ from datetime import date, datetime, timedelta, timezone
 
 import flet as ft
 
+import db  # unified multi-user data layer (schema.sql owns the tables now)
 from pages.theme import ThemeColors
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pantry.db")
+
+# Which user's pantry these functions read/write. Set once at login by MAIN.PY
+# via set_current_user(); defaults to 1 so anything run before login still works.
+_CURRENT_USER_ID = 1
+
+
+def set_current_user(user_id) -> None:
+    """MAIN.PY calls this at login so every pantry query is scoped to that user."""
+    global _CURRENT_USER_ID
+    _CURRENT_USER_ID = int(user_id) if user_id else 1
 DEFAULT_BEST_BY_DAYS = 30
 SAFETY = {
     "sealed_packaged": {"label": "Sealed", "can_donate": True},
@@ -29,26 +40,10 @@ UNITS = ["cans", "boxes", "bags", "jars", "bottles", "items", "lb"]
 
 
 def init_pantry_db() -> None:
-    """Create the database and safely migrate databases from the standalone app."""
-    with closing(sqlite3.connect(DB_PATH)) as con, con:
-        con.execute(
-            """CREATE TABLE IF NOT EXISTS pantry_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-                best_by TEXT NOT NULL, qty INTEGER NOT NULL, unit TEXT NOT NULL,
-                location TEXT NOT NULL, notes TEXT,
-                safety_class TEXT DEFAULT 'sealed_packaged',
-                status TEXT DEFAULT 'in_pantry', added_via_scan INTEGER DEFAULT 1,
-                added_on TEXT NOT NULL, source_key TEXT)"""
-        )
-        columns = {row[1] for row in con.execute("PRAGMA table_info(pantry_items)").fetchall()}
-        for column, definition in {
-            "safety_class": "TEXT DEFAULT 'sealed_packaged'",
-            "status": "TEXT DEFAULT 'in_pantry'",
-            "added_via_scan": "INTEGER DEFAULT 1",
-            "source_key": "TEXT",
-        }.items():
-            if column not in columns:
-                con.execute(f"ALTER TABLE pantry_items ADD COLUMN {column} {definition}")
+    """Build/upgrade the unified multi-user database (users, pantry, circles,
+    shares, donations, …). db.init_db() is idempotent and migrates an older
+    single-table pantry.db without losing data (existing items become owner 1)."""
+    db.init_db()
 
 
 def save_pantry_item(item: dict) -> int:
@@ -56,10 +51,11 @@ def save_pantry_item(item: dict) -> int:
     with closing(sqlite3.connect(DB_PATH)) as con, con:
         cursor = con.execute(
             """INSERT INTO pantry_items
-               (name,best_by,qty,unit,location,notes,safety_class,status,
+               (owner_id,name,best_by,qty,unit,location,notes,safety_class,status,
                 added_via_scan,added_on,source_key)
-               VALUES (?,?,?,?,?,?,?,'in_pantry',?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,'in_pantry',?,?,?)""",
             (
+                _CURRENT_USER_ID,
                 str(item.get("name") or "").strip(), str(item["best_by"]),
                 max(1, int(item.get("quantity") or 1)), str(item.get("unit") or "items"),
                 str(item.get("location") or "Shelf"), str(item.get("notes") or "").strip(),
@@ -76,7 +72,8 @@ def get_pantry_items() -> list[dict]:
     with closing(sqlite3.connect(DB_PATH)) as con, con:
         con.row_factory = sqlite3.Row
         rows = con.execute(
-            "SELECT * FROM pantry_items WHERE status='in_pantry' ORDER BY best_by,id DESC"
+            "SELECT * FROM pantry_items WHERE owner_id=? AND status='in_pantry' "
+            "ORDER BY best_by,id DESC", (_CURRENT_USER_ID,)
         ).fetchall()
     return [dict(row) for row in rows]
 
