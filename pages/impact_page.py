@@ -36,6 +36,7 @@ def build_impact_shell(
     metrics: dict, profile: dict, stats: dict, activity: list,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_logout, on_settings=None, on_back_click=None, on_circle=None,
+    on_share=None, on_donate=None,
 ) -> ft.Container:
     """Render the Impact / profile screen. UI only; data is passed in."""
     name = str(profile.get("name") or "Member")
@@ -57,9 +58,6 @@ def build_impact_shell(
                 ft.Text(name, size=20, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
                 ft.Text(subtitle, size=13, color=T.TEXT_SECONDARY),
             ]),
-            ft.Button(content=ft.Text("My Circle"), on_click=lambda _: on_circle(),
-                      style=ft.ButtonStyle(bgcolor=T.GREEN_SURFACE_SOFT, color=T.GREEN_TEXT,
-                                           shape=ft.RoundedRectangleBorder(radius=12))) if on_circle else ft.Container(),
             ft.IconButton(ft.Icons.SETTINGS_OUTLINED, icon_color=T.GREEN_TEXT,
                           on_click=on_settings) if on_settings else ft.Container(),
             ft.Button(content=ft.Text("Log out"), on_click=on_logout,
@@ -118,8 +116,30 @@ def build_impact_shell(
                        vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=badge_chips),
     )
 
+    def _hub_btn(label, cb):
+        return ft.Button(
+            expand=True, content=ft.Text(label, size=13, weight=ft.FontWeight.BOLD),
+            on_click=lambda _: cb(),
+            style=ft.ButtonStyle(bgcolor=T.GREEN_SURFACE_SOFT, color=T.GREEN_TEXT,
+                                 shape=ft.RoundedRectangleBorder(radius=13)))
+
+    hub_buttons = []
+    if on_circle:
+        hub_buttons.append(_hub_btn("👥  My Circle", on_circle))
+    if on_share:
+        hub_buttons.append(_hub_btn("🤝  Share food", on_share))
+    if on_donate:
+        hub_buttons.append(_hub_btn("🏦  Donate", on_donate))
+    actions_card = ft.Container(
+        bgcolor="#FFFFFF", border_radius=18, padding=16,
+        content=ft.Column(spacing=10, controls=[
+            ft.Text("Community", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+            ft.Row(spacing=8, controls=hub_buttons),
+        ]),
+    ) if hub_buttons else ft.Container()
+
     controls = [
         app_header(metrics, "Your Impact", on_back_click),
-        header_card, stats_grid, activity_card, badges_card,
+        header_card, actions_card, stats_grid, activity_card, badges_card,
     ]
     return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)

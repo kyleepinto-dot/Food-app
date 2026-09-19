@@ -110,6 +110,9 @@ def main(page: ft.Page):
     if view_state["user_id"]:
         set_current_user(view_state["user_id"])
         view_state["pantry_products"] = get_pantry_items()
+        _restored_user = db.get_user(view_state["user_id"])
+        if _restored_user and isinstance(view_state.get("profile"), dict):
+            view_state["profile"]["name"] = _restored_user["name"]
 
     def _ai_profile_cache_key(product_name: str, categories: str) -> str:
         return f"{product_name.strip().lower()}|{categories.strip().lower()}"
@@ -899,6 +902,9 @@ def main(page: ft.Page):
         view_state["user_id"] = uid
         session.save(uid)
         set_current_user(uid)
+        user = db.get_user(uid)
+        if user and isinstance(view_state.get("profile"), dict):
+            view_state["profile"]["name"] = user["name"]
         view_state["pantry_products"] = get_pantry_items()
         view_state["welcome_error"] = ""
         view_state["current"] = "pantry"
@@ -971,11 +977,17 @@ def main(page: ft.Page):
         profile = {"name": name, "since_text": since, "circle_size": queries.get_circle_size(uid)}
         stats = queries.get_impact(uid)
         activity = queries.get_recent_activity(uid)
+        def go_share():
+            view_state["share_item_id"] = None   # generic share (pick type on the form)
+            view_state["current"] = "share"
+            render_current_view()
+
         return build_impact_shell(
             metrics, profile, stats, activity,
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me,
             on_logout=do_logout, on_circle=show_circle,
+            on_share=go_share, on_donate=show_donate,
         )
 
     def build_circle_view() -> ft.Container:

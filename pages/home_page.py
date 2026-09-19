@@ -475,7 +475,7 @@ def build_home_shell(
                         spacing=2,
                         controls=[
                             ft.Text("PantryIQ Connect", size=44 if metrics["is_desktop"] else 34, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
-                            ft.Text("Welcome back, Jamie!", size=20 if metrics["is_desktop"] else 16, weight=ft.FontWeight.W_600),
+                            ft.Text(f"Welcome back, {profile_data.get('name') or 'there'}!", size=20 if metrics["is_desktop"] else 16, weight=ft.FontWeight.W_600),
                             ft.Text(
                                 "Here's what's happening with your pantry and community impact.",
                                 size=12,
