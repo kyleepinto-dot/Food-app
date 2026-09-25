@@ -64,7 +64,7 @@ def build_home_shell(
     """Compose the full home screen shell used by the main renderer.
 
     Args:
-        metrics: Responsive sizing map from MAIN.PY (breakpoint-derived).
+        metrics: Responsive sizing map from main.py (breakpoint-derived).
         on_scan_click: Navigation callback that switches to scan view.
     """
 

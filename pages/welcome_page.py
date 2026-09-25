@@ -5,7 +5,7 @@ Two modes that toggle:
   "create" -> name + email + password to make a NEW account
 
 Shown BEFORE login, so it has no bottom nav. Flet 0.85, UI only. The screen does
-light empty/length validation, then hands valid values to on_submit; MAIN.PY calls
+light empty/length validation, then hands valid values to on_submit; main.py calls
 db.create_account / db.check_login and re-renders with `error` set on failure.
 
   on_submit({"mode", "name", "email", "password"})

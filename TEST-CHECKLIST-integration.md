@@ -21,7 +21,7 @@ the working app on `yaashvi-dev` is untouched until this is tested and merged.
    ```
 3. Run the app:
    ```
-   flet run MAIN.PY
+      flet run main.py
    ```
 
 ## What changed (so you know what to look at)

@@ -1,12 +1,12 @@
-# MAIN.PY Quiz
+# main.py Quiz
 
-Use [MAIN.PY](MAIN.PY) and answer each question with the correct multiple-choice letter.
+Use [main.py](main.py) and answer each question with the correct multiple-choice letter.
 
 After each question there is a blank space for your response.
 
 ## Multiple Choice Questions
 
-1. In `MAIN.PY`, what is the purpose of `view_state = {"current": "home"}`?
+1. In `main.py`, what is the purpose of `view_state = {"current": "home"}`?
 
 A. It stores decoded barcode history.
 

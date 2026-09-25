@@ -44,13 +44,13 @@ python -m pip install -r requirements.txt
 Run locally:
 
 ```bash
-python MAIN.PY
+python main.py
 ```
 
 Or web mode:
 
 ```bash
-flet run --web MAIN.PY
+flet run --web main.py
 ```
 
 Alternate VS Code flow:
@@ -158,13 +158,13 @@ Use either `kylee-dev` or `yaashvi-dev` as your working branch and sync it befor
 - Run app from terminal:
 
 ```bash
-python MAIN.PY
+python main.py
 ```
 
 - Run web mode:
 
 ```bash
-flet run --web MAIN.PY
+flet run --web main.py
 ```
 
 - Debug:
@@ -176,7 +176,7 @@ flet run --web MAIN.PY
 - Use the Problems panel to resolve Python and import errors before opening a PR.
 - Re-run the app after fixes to verify behavior, especially UI/navigation and scanner flow.
 - Keep file/module names and imports consistent with current structure:
-	- `MAIN.PY`
+	- `main.py`
 	- `pages/home_page.py`
 	- `pages/barcode_page.py`
 

@@ -1,6 +1,6 @@
-# MAIN.PY Quiz
+# main.py Quiz
 
-Use [MAIN.PY](MAIN.PY) and answer each question with the correct multiple-choice letter.
+Use [main.py](main.py) and answer each question with the correct multiple-choice letter.
 
 After each question there is a blank space for your response.
 

@@ -2,7 +2,7 @@
 
 Ported into the single app's Flet 0.85 design language, using the shared shell in
 shell_kit.py and the `build_*_shell(metrics, data, callbacks)` pattern from
-pantry_page.py. UI only — MAIN.PY computes the data and passes it in.
+pantry_page.py. UI only — main.py computes the data and passes it in.
 
 Data contract:
   profile  = {"name": str, "since_text": str, "circle_size": int}

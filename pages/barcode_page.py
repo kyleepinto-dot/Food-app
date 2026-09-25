@@ -529,7 +529,7 @@ def build_scan_shell(
     on_manual_search,
 ) -> dict:
     # Build the complete scanner shell and return both the root container and
-    # individual controls needed by asynchronous camera handlers in MAIN.PY.
+    # individual controls needed by asynchronous camera handlers in main.py.
     status_text = ft.Text(value="Camera ready", size=13, color=ThemeColors.GREEN_TEXT, weight=ft.FontWeight.W_500)
     result_text = ft.Text(
         value="No barcode scanned yet",

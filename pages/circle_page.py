@@ -4,7 +4,7 @@ Shows the Circle's members, pending invites, and an invite box. The Circle is th
 trusted group that is the ONLY audience allowed to receive homemade/opened food
 (the food-safety rule lives in db.py). Flet 0.85, shared shell, UI only.
 
-Data contract (MAIN.PY supplies it):
+Data contract (main.py supplies it):
   circle_name = str
   members  = list[dict]  # each: name, role ("owner"/…), relation, distance_mi, shared_count
   pending  = list[dict]  # each: invited_email, method, code, created_on

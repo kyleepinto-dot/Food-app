@@ -34,14 +34,16 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install Flet CLI
-        run: python -m pip install "flet==0.85.3"
+        run: python -m pip install "flet[cli]==0.85.3"
+
+      - name: Verify Flet CLI
+        run: flet --version
 
       - name: Build ${{ matrix.target }}
         run: >-
           flet build ${{ matrix.target }}
           --yes
           --verbose
-          --python-version 3.12
           --build-number ${{ github.run_number }}
 
       - name: Upload ${{ matrix.target }} archive

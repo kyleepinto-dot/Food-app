@@ -7,7 +7,7 @@ The Share form posts food to the right audience, decided by the food-safety type
 When sharing straight from a pantry item, the type is LOCKED to that item's type
 so the audience can never be broadened (rule enforced in db.create_share).
 
-Flet 0.85, shared shell, UI only. MAIN.PY handles the actual db.create_share call
+Flet 0.85, shared shell, UI only. main.py handles the actual db.create_share call
 inside the on_share callback.
 
 Data contract:
@@ -49,7 +49,7 @@ def build_share_shell(
     metrics: dict, draft: dict, on_share, on_cancel,
     on_home_click, on_scan_click, on_pantry_click, on_me_click, on_back_click=None,
 ) -> ft.Container:
-    """Render the Share form. UI only; MAIN.PY posts the share in on_share."""
+    """Render the Share form. UI only; main.py posts the share in on_share."""
     locked = bool(draft.get("locked"))
     default_safety = str(draft.get("safety_class") or "homemade_or_opened")
 

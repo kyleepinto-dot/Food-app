@@ -6,7 +6,7 @@ Donate is a 3-step flow on one screen:
   3. Confirm the drop-off and get a pass
 Plus a partner dashboard where a food bank checks donations in.
 
-Flet 0.85, shared shell, UI only. MAIN.PY owns the selection state and passes the
+Flet 0.85, shared shell, UI only. main.py owns the selection state and passes the
 current selection in; the pick/confirm callbacks update it and re-render.
 
 Donate data contract:
@@ -61,7 +61,7 @@ def build_donate_shell(
     metrics: dict, data: dict, on_pick_item, on_pick_bank, on_confirm, on_view_dashboard,
     on_home_click, on_scan_click, on_pantry_click, on_me_click, on_back_click=None,
 ) -> ft.Container:
-    """Render the 3-step Donate flow. UI only; MAIN.PY owns selection + writes."""
+    """Render the 3-step Donate flow. UI only; main.py owns selection + writes."""
     eligible = data.get("eligible") or []
     banks = data.get("banks") or []
     sel_item = next((it for it in eligible if it["id"] == data.get("selected_item_id")), None)

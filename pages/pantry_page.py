@@ -15,13 +15,13 @@ from pages.theme import ThemeColors
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pantry.db")
 
-# Which user's pantry these functions read/write. Set once at login by MAIN.PY
+# Which user's pantry these functions read/write. Set once at login by main.py
 # via set_current_user(); defaults to 1 so anything run before login still works.
 _CURRENT_USER_ID = 1
 
 
 def set_current_user(user_id) -> None:
-    """MAIN.PY calls this at login so every pantry query is scoped to that user."""
+    """main.py calls this at login so every pantry query is scoped to that user."""
     global _CURRENT_USER_ID
     _CURRENT_USER_ID = int(user_id) if user_id else 1
 DEFAULT_BEST_BY_DAYS = 30

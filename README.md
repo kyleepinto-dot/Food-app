@@ -10,7 +10,7 @@ It includes:
 
 ## Project Structure
 
-- `MAIN.PY`
+- `main.py`
   - App entrypoint
   - Screen navigation and rendering
   - Responsive layout metrics
@@ -23,7 +23,7 @@ It includes:
 - `pages/theme.py`
   - Centralized `ThemeColors` tokens shared across UI pages
 - `MainPageQuiz.cmd`
-  - Multiple-choice learning quiz focused on `MAIN.PY`
+  - Multiple-choice learning quiz focused on `main.py`
 - `pages/HomePageQuiz.md`
   - Multiple-choice learning quiz focused on `home_page.py`
 - `pages/BarcodePageQuiz.md`
@@ -31,7 +31,7 @@ It includes:
 
 ## Code Tour
 
-- [App bootstrap and flow](MAIN.PY)
+- [App bootstrap and flow](main.py)
 - [Home page UI](pages/home_page.py)
 - [Barcode page UI](pages/barcode_page.py)
 - [Theme color tokens](pages/theme.py)
@@ -92,13 +92,13 @@ python -m pip install -r requirements.txt
 Run the app:
 
 ```bash
-python MAIN.PY
+python main.py
 ```
 
 For web mode:
 
 ```bash
-flet run --web MAIN.PY
+flet run --web main.py
 ```
 
 ## Debugging in Visual Studio Code

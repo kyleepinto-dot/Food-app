@@ -2,14 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Flet Web: MAIN.PY",
+            "name": "Flet Web: main.py",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}\\.venv\\Scripts\\flet.exe",
             "args": [
                 "run",
                 "--web",
-                "MAIN.PY"
+                "main.py"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
@@ -18,10 +18,10 @@
             }
         },
         {
-            "name": "PantryIQ: Run MAIN.PY (.uvvenv)",
+            "name": "PantryIQ: Run main.py (.uvvenv)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}\\MAIN.PY",
+            "program": "${workspaceFolder}\\main.py",
             "python": "${workspaceFolder}\\.uvvenv\\Scripts\\python.exe",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
