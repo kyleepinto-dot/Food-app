@@ -1,0 +1,41 @@
+[project]
+name = "foodapp"
+version = "1.0.0"
+description = "PantryIQ Connect barcode scanning and food-sharing application"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "flet==0.85.3",
+    "flet-camera==0.85.3",
+    "numpy==2.2.2",
+    "opencv-python==4.12.0.88",
+    "pyzbar==0.1.9",
+]
+
+[tool.flet]
+product = "PantryIQ Connect"
+permissions = ["camera"]
+
+[tool.flet.android]
+extract_packages = ["cv2"]
+
+[tool.flet.android.feature]
+"android.hardware.camera" = false
+
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true
+"android.permission.RECORD_AUDIO" = false
+"android.permission.READ_EXTERNAL_STORAGE" = false
+"android.permission.WRITE_EXTERNAL_STORAGE" = false
+
+[tool.flet.app]
+path = "."
+module = "MAIN.PY"
+exclude = [
+    ".git",
+    ".github",
+    ".venv",
+    ".uvvenv",
+    ".vscode",
+    "tests",
+    "yaashvi",
+]
