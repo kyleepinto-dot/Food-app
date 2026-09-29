@@ -1071,9 +1071,10 @@ def main(page: ft.Page):
             qty = it["qty"]
             draft = {"locked": True,
                      "title": it["name"] + (f" ×{qty}" if qty and qty > 1 else ""),
-                     "safety_class": it["safety_class"] or "homemade_or_opened"}
+                     "safety_class": it["safety_class"] or "homemade_or_opened",
+                     "best_by": it["best_by"] or ""}
         else:
-            draft = {"locked": False, "title": "", "safety_class": "homemade_or_opened"}
+            draft = {"locked": False, "title": "", "safety_class": "homemade_or_opened", "best_by": ""}
 
         def on_share(values: dict) -> None:
             db.create_share(shared_by=view_state["user_id"], item_id=item_id,

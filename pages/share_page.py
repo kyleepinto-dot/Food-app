@@ -18,6 +18,8 @@ Callback:
 
 from __future__ import annotations
 
+from datetime import date
+
 import flet as ft
 
 from pages.theme import ThemeColors as T
@@ -29,8 +31,20 @@ SHARE_TYPES = [
     ("fresh_produce", "Fresh produce (uncut)"),
 ]
 TYPE_LABEL = {k: v for k, v in SHARE_TYPES}
-BEST_BY_OPTIONS = ["Made today", "Best by this week", "Best by next week", "Best by this month"]
-PICKUP_OPTIONS = ["Today 5–7pm", "Tomorrow morning", "This weekend", "Anytime — message me"]
+
+
+def _time_options() -> list[str]:
+    """Pickup times every 30 min from 7:00 AM to 9:30 PM, with AM/PM."""
+    out = []
+    for h24 in range(7, 22):
+        for minute in (0, 30):
+            ampm = "AM" if h24 < 12 else "PM"
+            h12 = h24 % 12 or 12
+            out.append(f"{h12}:{minute:02d} {ampm}")
+    return out
+
+
+TIME_OPTIONS = _time_options()
 
 
 def audience_text(safety_class: str) -> str:
@@ -58,15 +72,25 @@ def build_share_shell(
         label="Name & quantity — e.g. Veggie pasta bake, serves 4",
         border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
-    best_by_dd = ft.Dropdown(
-        label="Made / best-by date", border_radius=12, expand=True,
-        options=[ft.dropdown.Option(x) for x in BEST_BY_OPTIONS],
+    best_by_in = ft.TextField(
+        value=str(draft.get("best_by") or ""),
+        label="Best-by date (YYYY-MM-DD)", hint_text="e.g. 2026-10-15",
+        border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
-    pickup_dd = ft.Dropdown(
-        label="Pickup window", border_radius=12, expand=True,
-        options=[ft.dropdown.Option(x) for x in PICKUP_OPTIONS],
+    pickup_date_in = ft.TextField(
+        label="Pickup date (YYYY-MM-DD)", hint_text="e.g. 2026-10-05",
+        border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY, expand=True,
+    )
+    pickup_time_dd = ft.Dropdown(
+        label="Pickup time", border_radius=12, expand=True,
+        options=[ft.dropdown.Option(t) for t in TIME_OPTIONS],
     )
     err = ft.Text("", size=13, color="#B5402C", visible=False)
+
+    def _show_err(msg: str) -> None:
+        err.value = msg
+        err.visible = True
+        err.update()
 
     # Food-type chooser: locked note (from a pantry item) or radios (free share).
     if locked:
@@ -94,13 +118,34 @@ def build_share_shell(
     def submit(_):
         title = str(title_in.value or "").strip()
         if not title:
-            err.value = "Give it a name & quantity first."
-            err.visible = True
-            err.update()
+            _show_err("Give it a name & quantity first.")
             return
+        best_by = str(best_by_in.value or "").strip()
+        if best_by:
+            try:
+                date.fromisoformat(best_by)
+            except ValueError:
+                _show_err("Best-by date must look like 2026-10-15.")
+                return
+        pdate = str(pickup_date_in.value or "").strip()
+        if pdate:
+            try:
+                date.fromisoformat(pdate)
+            except ValueError:
+                _show_err("Pickup date must look like 2026-10-05.")
+                return
+        ptime = str(pickup_time_dd.value or "").strip()
+        if pdate and ptime:
+            pickup_window = f"{pdate} at {ptime}"
+        elif pdate:
+            pickup_window = pdate
+        elif ptime:
+            pickup_window = ptime
+        else:
+            pickup_window = "Flexible - arrange together"
         on_share({
             "title": title, "safety_class": get_safety(),
-            "best_by": best_by_dd.value, "pickup_window": pickup_dd.value,
+            "best_by": best_by, "pickup_window": pickup_window,
         })
 
     controls = [
@@ -116,7 +161,9 @@ def build_share_shell(
         ])),
         ft.Container(bgcolor="#FFFFFF", border_radius=18, padding=16, content=ft.Column(spacing=12, controls=[
             title_in,
-            ft.Row(spacing=8, controls=[best_by_dd, pickup_dd]),
+            best_by_in,
+            ft.Text("When can they pick it up?", size=13, weight=ft.FontWeight.BOLD, color=T.TEXT_SECONDARY),
+            ft.Row(spacing=8, controls=[pickup_date_in, pickup_time_dd]),
         ])),
         err,
         ft.Row(spacing=8, controls=[
