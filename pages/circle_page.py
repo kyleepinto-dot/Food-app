@@ -96,7 +96,7 @@ def _pending_card(inv: dict, on_resend, on_accept, on_cancel_invite) -> ft.Conta
 
 def build_circle_shell(
     metrics: dict, circle_name: str, members: list, pending: list,
-    on_send_invite, on_copy_link, on_resend,
+    on_send_invite, on_resend,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_back_click=None, invite_error: str = "",
     on_accept=None, on_cancel_invite=None,
@@ -107,7 +107,7 @@ def build_circle_shell(
         border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
     invite_input = ft.TextField(
-        hint_text="Phone number or email…", border_radius=12,
+        hint_text="Email address…", border_radius=12,
         border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
     error_text = ft.Text(invite_error, size=13, color="#B5402C", visible=bool(invite_error))
@@ -140,14 +140,9 @@ def build_circle_shell(
         content=ft.Column(spacing=10, controls=[
             ft.Text("Invite someone you trust", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
             name_input, invite_input, error_text,
-            ft.Row(spacing=8, controls=[
-                ft.Button(expand=True, content=ft.Text("Send invite", weight=ft.FontWeight.BOLD), on_click=_send,
-                          style=ft.ButtonStyle(bgcolor=T.BRAND_PRIMARY, color="#FFFFFF",
-                                               shape=ft.RoundedRectangleBorder(radius=13))),
-                ft.Button(expand=True, content=ft.Text("Copy link"), on_click=lambda _: on_copy_link(),
-                          style=ft.ButtonStyle(bgcolor="#FFFFFF", color=T.GREEN_TEXT,
-                                               shape=ft.RoundedRectangleBorder(radius=13))),
-            ]),
+            ft.Button(content=ft.Text("Send invite", weight=ft.FontWeight.BOLD), on_click=_send,
+                      style=ft.ButtonStyle(bgcolor=T.BRAND_PRIMARY, color="#FFFFFF",
+                                           shape=ft.RoundedRectangleBorder(radius=13))),
         ]),
     )
 

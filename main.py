@@ -1016,15 +1016,15 @@ def main(page: ft.Page):
             return False
 
         def on_send_invite(contact: str, name: str = "") -> None:
+            if not email_service.looks_like_email(contact):
+                show_message("Please enter a valid email address.")
+                return
             if queries.is_member_email(circle["id"], contact):
                 show_message(f"{contact} is already in your Circle.")
                 return
             code = queries.create_invite(circle["id"], contact, uid, name)
             if not _email_invite(contact, code):
-                if email_service.looks_like_email(contact):
-                    show_message(f"Invite created for {contact} (email sending isn't set up yet).")
-                else:
-                    show_message(f"Invite created for {contact}.")
+                show_message(f"Invite saved for {contact} (email sending isn't set up yet).")
             render_current_view()
 
         def on_resend(inv) -> None:
@@ -1051,18 +1051,9 @@ def main(page: ft.Page):
             show_message("Invite removed.")
             render_current_view()
 
-        def copy_link() -> None:
-            link = f"https://sharedpantry.app/join/{circle['id']}" if circle else "https://sharedpantry.app"
-            try:
-                page.run_task(page.clipboard.set, link)   # clipboard.set is async in Flet 0.85
-                show_message("Invite link copied to clipboard.")
-            except Exception:
-                show_message(f"Invite link: {link}")
-
         return build_circle_shell(
             metrics, circle["name"] if circle else "My Circle", members, pending,
             on_send_invite=on_send_invite,
-            on_copy_link=copy_link,
             on_resend=on_resend,
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_me,
