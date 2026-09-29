@@ -30,6 +30,7 @@ from pages.me_page import build_me_shell
 import db
 import queries
 import session
+import email_service
 from pages.pantry_page import set_current_user
 from pages.welcome_page import build_welcome_shell
 from pages.impact_page import build_impact_shell
@@ -999,8 +1000,21 @@ def main(page: ft.Page):
         pending = [dict(p) for p in queries.get_pending_invites(circle["id"])]
 
         def on_send_invite(contact: str) -> None:
-            queries.create_invite(circle["id"], contact, uid)
-            show_message(f"Invite created for {contact}.")
+            code = queries.create_invite(circle["id"], contact, uid)
+            inviter = user["name"] if user else "A friend"
+            cname = circle["name"] if circle else "My Circle"
+            if email_service.looks_like_email(contact) and email_service.is_configured():
+                # Send the real email OFF the UI thread so the app never freezes.
+                def _send_and_notify():
+                    ok, why = email_service.send_invite_email(contact, inviter, cname, code)
+                    show_message(f"Invite email sent to {contact}." if ok
+                                 else f"Invite saved, but the email didn't send: {why}.")
+                show_message(f"Sending invite to {contact}...")
+                page.run_thread(_send_and_notify)
+            elif email_service.looks_like_email(contact):
+                show_message(f"Invite created for {contact} (email sending isn't set up yet).")
+            else:
+                show_message(f"Invite created for {contact}.")
             render_current_view()
 
         def copy_link() -> None:
