@@ -142,7 +142,7 @@ def _hash_password(password, salt=None):
     return salt.hex(), dk.hex()                    # store both as text (hex)
 
 
-def create_account(name, email, password):
+def create_account(name, email, password) -> int:
     """Make a new user, hash their password, and give them their own Circle.
     Returns the new user's id. Raises ValueError if the email is already used."""
     name  = name.strip()
@@ -160,6 +160,10 @@ def create_account(name, email, password):
         (name, email, salt_hex, hash_hex),
     )
     user_id = cur.lastrowid
+    if user_id is None:
+        con.rollback()
+        con.close()
+        raise RuntimeError("Could not create the user account.")
 
     # Give the new user their very own Circle, and make them its owner. Their
     # pantry is empty automatically, because pantry_items are filtered by owner.
@@ -347,7 +351,7 @@ def get_donatable_items(owner_id):
             if can_donate(it["safety_class"], it["best_by"])]
 
 
-def create_donation(donated_by, item_id, food_bank_id, dropoff_window=None):
+def create_donation(donated_by, item_id, food_bank_id, dropoff_window=None) -> int:
     """Log a donation and take the item out of the pantry (status 'donated').
     Refuses (ValueError) if the item doesn't pass the food-safety rule — so the
     rule is enforced in the database, not just hidden by the screen."""
@@ -369,6 +373,10 @@ def create_donation(donated_by, item_id, food_bank_id, dropoff_window=None):
         (item_id, donated_by, food_bank_id, row[2], dropoff_window, _now()),
     )
     donation_id = cur.lastrowid
+    if donation_id is None:
+        con.rollback()
+        con.close()
+        raise RuntimeError("Could not create the donation.")
     # The item leaves the pantry, just like composting does.
     con.execute("UPDATE pantry_items SET status = 'donated' WHERE id = ?", (item_id,))
     con.commit()

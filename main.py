@@ -921,7 +921,10 @@ def main(page: ft.Page):
                     view_state["welcome_error"] = "That email or password isn't right."
                     render_current_view()
                     return
-                uid = row["id"]
+                uid_value = row["id"]
+                if not isinstance(uid_value, int):
+                    raise ValueError("That account has an invalid user ID.")
+                uid = uid_value
         except ValueError as ex:
             view_state["welcome_error"] = str(ex)
             render_current_view()

@@ -1,5 +1,6 @@
 import flet as ft
 import flet_camera as fc
+import flet_permission_handler as fph
 import cv2
 import numpy as np
 import re
@@ -33,6 +34,7 @@ class BarcodeScannerController:
 
     def __init__(self, page: ft.Page):
         self.page = page
+        self.permission_handler = fph.PermissionHandler()
         self.camera = None
         self.running = False
         self.streaming_supported = False
@@ -409,6 +411,26 @@ class BarcodeScannerController:
             return
 
         try:
+            # Browser camera access is prompted by the browser. Native mobile
+            # apps must obtain the OS runtime permission before camera setup.
+            if not bool(getattr(self.page, "web", False)):
+                platform_name = str(self.page.platform).lower()
+                if "android" in platform_name or "ios" in platform_name:
+                    permission_status = await self.permission_handler.request(fph.Permission.CAMERA)
+                    self.append_debug("camera_permission", f"Camera permission status={permission_status}")
+                    if permission_status != fph.PermissionStatus.GRANTED:
+                        if self.status_text is not None:
+                            self.status_text.value = "Camera permission denied"
+                        if self.result_text is not None:
+                            if permission_status == fph.PermissionStatus.PERMANENTLY_DENIED:
+                                self.result_text.value = "Enable Camera for PantryIQ Connect in system settings."
+                            elif permission_status == fph.PermissionStatus.RESTRICTED:
+                                self.result_text.value = "Camera access is restricted by this device."
+                            else:
+                                self.result_text.value = "Allow camera access to scan a barcode."
+                        self.page.update()
+                        return
+
             # Discover cameras and initialize the first available device.
             cameras = await self.camera.get_available_cameras()
             if not cameras:
