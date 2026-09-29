@@ -907,7 +907,7 @@ def main(page: ft.Page):
             view_state["profile"]["name"] = user["name"]
         view_state["pantry_products"] = get_pantry_items()
         view_state["welcome_error"] = ""
-        view_state["current"] = "pantry"
+        view_state["current"] = "home"
         render_current_view()
 
     def welcome_submit(values: dict) -> None:
@@ -1003,10 +1003,18 @@ def main(page: ft.Page):
             show_message(f"Invite created for {contact}.")
             render_current_view()
 
+        def copy_link() -> None:
+            link = f"https://sharedpantry.app/join/{circle['id']}" if circle else "https://sharedpantry.app"
+            try:
+                page.run_task(page.clipboard.set, link)   # clipboard.set is async in Flet 0.85
+                show_message("Invite link copied to clipboard.")
+            except Exception:
+                show_message(f"Invite link: {link}")
+
         return build_circle_shell(
             metrics, circle["name"] if circle else "My Circle", members, pending,
             on_send_invite=on_send_invite,
-            on_copy_link=lambda: show_message("Circle invite link copied."),
+            on_copy_link=copy_link,
             on_resend=lambda code: show_message(f"Invite {code} re-sent."),
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_me,
@@ -1121,7 +1129,7 @@ def main(page: ft.Page):
     # Start on the pantry if a saved session logged us in; otherwise the login
     # gate in render_current_view() shows the Welcome screen.
     if view_state.get("user_id"):
-        view_state["current"] = "pantry"
+        view_state["current"] = "home"
     render_current_view()
 
 
