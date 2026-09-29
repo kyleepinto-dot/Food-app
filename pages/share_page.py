@@ -47,6 +47,21 @@ def _time_options() -> list[str]:
 
 TIME_OPTIONS = _time_options()
 
+# Words that hint an item is a prepared/cooked dish (so "Sealed & packaged" is
+# probably wrong). Used only for a soft nudge — the attestation checkbox is the
+# real gate, so a false match just shows a slightly different message.
+COOKED_WORDS = (
+    "bake", "baked", "soup", "stew", "curry", "casserole", "roast", "roasted",
+    "fried", "grilled", "cooked", "homemade", "home-made", "leftover", "leftovers",
+    "lasagna", "meatball", "burrito", "taco", "chili", "stir fry", "stir-fry",
+    "gravy", "sauce", "stuffing", "quiche", "risotto",
+)
+
+
+def _looks_cooked(name: str) -> bool:
+    low = (name or "").lower()
+    return any(word in low for word in COOKED_WORDS)
+
 
 def audience_text(safety_class: str) -> str:
     """Friendly words for who can see a share of this food type."""
@@ -128,10 +143,28 @@ def build_share_shell(
         get_safety = lambda: radio.value
         type_inner = radio
 
+    # Attestation: required only for the widest audience (sealed -> food banks).
+    # Shown for locked sealed items, or always for a free share (type can change).
+    show_attest = (default_safety == "sealed_packaged") if locked else True
+    attest = ft.Checkbox(
+        value=False, active_color=T.BRAND_PRIMARY,
+        label="I confirm this is sealed, unopened, and in-date (required to offer it to the community or food banks).",
+    ) if show_attest else None
+
     def submit(_):
         title = str(title_in.value or "").strip()
         if not title:
             _show_err("Give it a name & quantity first.")
+            return
+        # Wider-audience (sealed) shares need the confirmation ticked; nudge if the
+        # name looks like a cooked dish that probably shouldn't be marked sealed.
+        if get_safety() == "sealed_packaged" and (attest is None or not attest.value):
+            if _looks_cooked(title):
+                _show_err(f"\"{title}\" looks like a prepared dish. If it's truly sealed & "
+                          f"packaged, tick the confirmation box below to continue.")
+            else:
+                _show_err("Please tick the box confirming this is sealed, unopened & in-date "
+                          "to offer it to the community or food banks.")
             return
         # Best-by: a locked share uses the item's stored date; a free share parses the field.
         if locked:
@@ -192,6 +225,7 @@ def build_share_shell(
             best_by_in,
             ft.Text("When can they pick it up?", size=13, weight=ft.FontWeight.BOLD, color=T.TEXT_SECONDARY),
             ft.Row(spacing=8, controls=[pickup_date_in, pickup_time_dd]),
+            *([attest] if attest else []),
         ])),
         err,
         ft.Row(spacing=8, controls=[
