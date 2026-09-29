@@ -84,6 +84,8 @@ def init_db():
         con.execute("ALTER TABLE circle_invites ADD COLUMN code TEXT")
     if "method" not in icols:
         con.execute("ALTER TABLE circle_invites ADD COLUMN method TEXT")
+    if "invited_name" not in icols:
+        con.execute("ALTER TABLE circle_invites ADD COLUMN invited_name TEXT")
 
     # Donate flow: food_banks gained distance/schedule; donations gained a
     # drop-off window.

@@ -102,6 +102,10 @@ def build_circle_shell(
     on_accept=None, on_cancel_invite=None,
 ) -> ft.Container:
     """Render My Circle. UI only; data + callbacks are passed in."""
+    name_input = ft.TextField(
+        hint_text="Their name (optional)", border_radius=12,
+        border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
+    )
     invite_input = ft.TextField(
         hint_text="Phone number or email…", border_radius=12,
         border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
@@ -115,7 +119,7 @@ def build_circle_shell(
             error_text.visible = True
             error_text.update()
             return
-        on_send_invite(contact)
+        on_send_invite(contact, str(name_input.value or "").strip())
 
     member_count = len(members)
     members_block = [
@@ -135,7 +139,7 @@ def build_circle_shell(
         bgcolor="#FFFFFF", border_radius=18, padding=16,
         content=ft.Column(spacing=10, controls=[
             ft.Text("Invite someone you trust", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
-            invite_input, error_text,
+            name_input, invite_input, error_text,
             ft.Row(spacing=8, controls=[
                 ft.Button(expand=True, content=ft.Text("Send invite", weight=ft.FontWeight.BOLD), on_click=_send,
                           style=ft.ButtonStyle(bgcolor=T.BRAND_PRIMARY, color="#FFFFFF",

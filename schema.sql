@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS circle_invites (
     invited_by    INTEGER NOT NULL,
     code          TEXT,                      -- the invite code we generate for them
     method        TEXT,                      -- 'text' (phone) or 'email'
+    invited_name  TEXT,                      -- optional friendly name typed at invite time
     status        TEXT DEFAULT 'pending',    -- pending / accepted / declined
     created_on    TEXT DEFAULT (date('now')),
     FOREIGN KEY (circle_id)  REFERENCES circles(id),

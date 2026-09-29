@@ -1015,8 +1015,11 @@ def main(page: ft.Page):
                 return True
             return False
 
-        def on_send_invite(contact: str) -> None:
-            code = queries.create_invite(circle["id"], contact, uid)
+        def on_send_invite(contact: str, name: str = "") -> None:
+            if queries.is_member_email(circle["id"], contact):
+                show_message(f"{contact} is already in your Circle.")
+                return
+            code = queries.create_invite(circle["id"], contact, uid, name)
             if not _email_invite(contact, code):
                 if email_service.looks_like_email(contact):
                     show_message(f"Invite created for {contact} (email sending isn't set up yet).")
@@ -1029,6 +1032,11 @@ def main(page: ft.Page):
             code = inv.get("code") if isinstance(inv, dict) else None
             if not contact:
                 show_message("Can't resend this invite.")
+                return
+            if queries.is_member_email(circle["id"], contact):
+                queries.delete_invite(inv.get("id"))
+                show_message(f"{contact} is already in your Circle - removed the stale invite.")
+                render_current_view()
                 return
             if not _email_invite(contact, code):
                 show_message(f"Email isn't set up, so couldn't resend to {contact}.")

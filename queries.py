@@ -220,21 +220,48 @@ def check_in_donation(donation_id):
     con.close()
 
 
-def create_invite(circle_id, contact, invited_by):
+def _titleize(text):
+    """Capitalize the first letter of each word, leaving the rest as typed
+    ('bob smith' -> 'Bob Smith', 'McDonald' stays 'McDonald')."""
+    return " ".join(w[:1].upper() + w[1:] for w in (text or "").split())
+
+
+def _nice_name_from_email(contact):
+    """Turn 'john.doe@gmail.com' into 'John Doe' when no real name was given."""
+    local = (contact or "").split("@")[0]
+    cleaned = local.replace(".", " ").replace("_", " ").replace("-", " ")
+    return _titleize(cleaned) or (contact or "Member")
+
+
+def create_invite(circle_id, contact, invited_by, name=None):
     """Make an invite code and store a PENDING invite for a phone/email.
+    Optional name is remembered so the member shows a real name when accepted.
     Returns the new invite code so the screen can show it."""
     contact = contact.strip()
+    name = (name or "").strip() or None
     method = "email" if "@" in contact else "text"   # an @ means it's an email
     code = _make_invite_code()
     con = _connect()
     con.execute(
-        "INSERT INTO circle_invites (circle_id, invited_email, invited_by, code, method, status) "
-        "VALUES (?, ?, ?, ?, ?, 'pending')",
-        (circle_id, contact, invited_by, code, method),
+        "INSERT INTO circle_invites (circle_id, invited_email, invited_by, code, method, invited_name, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+        (circle_id, contact, invited_by, code, method, name),
     )
     con.commit()
     con.close()
     return code
+
+
+def is_member_email(circle_id, contact):
+    """True if someone with this email/phone is already a member of the circle."""
+    con = _connect()
+    row = con.execute(
+        "SELECT 1 FROM circle_members cm JOIN users u ON u.id = cm.user_id "
+        "WHERE cm.circle_id = ? AND lower(u.email) = lower(?)",
+        (circle_id, (contact or "").strip()),
+    ).fetchone()
+    con.close()
+    return row is not None
 
 
 def get_invite(invite_id):
@@ -268,13 +295,15 @@ def accept_invite(invite_id):
         return None
     email = inv["invited_email"]
     circle_id = inv["circle_id"]
+    typed_name = inv["invited_name"] if "invited_name" in inv.keys() else None
+    display_name = _titleize(typed_name) if (typed_name and typed_name.strip()) \
+        else _nice_name_from_email(email)
 
-    urow = con.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    urow = con.execute("SELECT id FROM users WHERE lower(email) = lower(?)", (email,)).fetchone()
     if urow:
         user_id = urow["id"]
     else:
-        name = email.split("@")[0] if "@" in email else email
-        cur = con.execute("INSERT INTO users (name, email) VALUES (?, ?)", (name, email))
+        cur = con.execute("INSERT INTO users (name, email) VALUES (?, ?)", (display_name, email))
         user_id = cur.lastrowid
 
     already = con.execute(
@@ -286,7 +315,13 @@ def accept_invite(invite_id):
             "VALUES (?, ?, 'member', 'Circle member')",
             (circle_id, user_id),
         )
-    con.execute("UPDATE circle_invites SET status = 'accepted' WHERE id = ?", (invite_id,))
+    # Clear THIS invite AND any other still-pending invites for the same email in
+    # this circle, so accepting one duplicate makes the rest disappear too.
+    con.execute(
+        "UPDATE circle_invites SET status = 'accepted' "
+        "WHERE circle_id = ? AND lower(invited_email) = lower(?) AND status = 'pending'",
+        (circle_id, email),
+    )
     con.commit()
     name = con.execute("SELECT name FROM users WHERE id = ?", (user_id,)).fetchone()["name"]
     con.close()
