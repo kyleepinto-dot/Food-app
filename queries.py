@@ -235,3 +235,59 @@ def create_invite(circle_id, contact, invited_by):
     con.commit()
     con.close()
     return code
+
+
+def get_invite(invite_id):
+    """Return one invite row (or None)."""
+    con = _connect()
+    row = con.execute("SELECT * FROM circle_invites WHERE id = ?", (invite_id,)).fetchone()
+    con.close()
+    return row
+
+
+def delete_invite(invite_id):
+    """Remove a pending invite (Cancel). Safe to call on any invite id."""
+    con = _connect()
+    con.execute("DELETE FROM circle_invites WHERE id = ?", (invite_id,))
+    con.commit()
+    con.close()
+
+
+def accept_invite(invite_id):
+    """Turn a pending invite into a real Circle member.
+
+    Finds or creates a lightweight user for the invited email (no password — they
+    can't sign in on THIS device, they're just recorded as a member), adds them to
+    the circle, and marks the invite accepted. Returns the member's name, or None
+    if the invite no longer exists.
+    """
+    con = _connect()
+    inv = con.execute("SELECT * FROM circle_invites WHERE id = ?", (invite_id,)).fetchone()
+    if inv is None:
+        con.close()
+        return None
+    email = inv["invited_email"]
+    circle_id = inv["circle_id"]
+
+    urow = con.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if urow:
+        user_id = urow["id"]
+    else:
+        name = email.split("@")[0] if "@" in email else email
+        cur = con.execute("INSERT INTO users (name, email) VALUES (?, ?)", (name, email))
+        user_id = cur.lastrowid
+
+    already = con.execute(
+        "SELECT 1 FROM circle_members WHERE circle_id = ? AND user_id = ?", (circle_id, user_id)
+    ).fetchone()
+    if not already:
+        con.execute(
+            "INSERT INTO circle_members (circle_id, user_id, role, relation) "
+            "VALUES (?, ?, 'member', 'Circle member')",
+            (circle_id, user_id),
+        )
+    con.execute("UPDATE circle_invites SET status = 'accepted' WHERE id = ?", (invite_id,))
+    con.commit()
+    name = con.execute("SELECT name FROM users WHERE id = ?", (user_id,)).fetchone()["name"]
+    con.close()
+    return name

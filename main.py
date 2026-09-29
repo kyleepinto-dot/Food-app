@@ -999,22 +999,48 @@ def main(page: ft.Page):
         members = [dict(m) for m in queries.get_circle_members(circle["id"])]
         pending = [dict(p) for p in queries.get_pending_invites(circle["id"])]
 
-        def on_send_invite(contact: str) -> None:
-            code = queries.create_invite(circle["id"], contact, uid)
-            inviter = user["name"] if user else "A friend"
-            cname = circle["name"] if circle else "My Circle"
+        inviter = user["name"] if user else "A friend"
+        cname = circle["name"] if circle else "My Circle"
+
+        def _email_invite(contact: str, code) -> bool:
+            """Send the invite email off the UI thread. Returns True if a send was
+            started (email address + email configured), False otherwise."""
             if email_service.looks_like_email(contact) and email_service.is_configured():
-                # Send the real email OFF the UI thread so the app never freezes.
                 def _send_and_notify():
                     ok, why = email_service.send_invite_email(contact, inviter, cname, code)
                     show_message(f"Invite email sent to {contact}." if ok
-                                 else f"Invite saved, but the email didn't send: {why}.")
+                                 else f"Email didn't send: {why}.")
                 show_message(f"Sending invite to {contact}...")
                 page.run_thread(_send_and_notify)
-            elif email_service.looks_like_email(contact):
-                show_message(f"Invite created for {contact} (email sending isn't set up yet).")
-            else:
-                show_message(f"Invite created for {contact}.")
+                return True
+            return False
+
+        def on_send_invite(contact: str) -> None:
+            code = queries.create_invite(circle["id"], contact, uid)
+            if not _email_invite(contact, code):
+                if email_service.looks_like_email(contact):
+                    show_message(f"Invite created for {contact} (email sending isn't set up yet).")
+                else:
+                    show_message(f"Invite created for {contact}.")
+            render_current_view()
+
+        def on_resend(inv) -> None:
+            contact = inv.get("invited_email") if isinstance(inv, dict) else None
+            code = inv.get("code") if isinstance(inv, dict) else None
+            if not contact:
+                show_message("Can't resend this invite.")
+                return
+            if not _email_invite(contact, code):
+                show_message(f"Email isn't set up, so couldn't resend to {contact}.")
+
+        def on_accept(invite_id) -> None:
+            name = queries.accept_invite(invite_id)
+            show_message(f"{name} added to your Circle." if name else "Invite not found.")
+            render_current_view()
+
+        def on_cancel_invite(invite_id) -> None:
+            queries.delete_invite(invite_id)
+            show_message("Invite removed.")
             render_current_view()
 
         def copy_link() -> None:
@@ -1029,9 +1055,10 @@ def main(page: ft.Page):
             metrics, circle["name"] if circle else "My Circle", members, pending,
             on_send_invite=on_send_invite,
             on_copy_link=copy_link,
-            on_resend=lambda code: show_message(f"Invite {code} re-sent."),
+            on_resend=on_resend,
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_me,
+            on_accept=on_accept, on_cancel_invite=on_cancel_invite,
         )
 
     def build_share_view() -> ft.Container:

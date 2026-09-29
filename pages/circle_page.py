@@ -62,22 +62,34 @@ def _member_card(m: dict) -> ft.Container:
     )
 
 
-def _pending_card(inv: dict, on_resend) -> ft.Container:
-    code = inv.get("code") or "—"
+def _small_btn(label: str, cb, color: str) -> ft.Button:
+    return ft.Button(
+        content=ft.Text(label, size=12, weight=ft.FontWeight.BOLD),
+        on_click=cb,
+        style=ft.ButtonStyle(bgcolor="#FFFFFF", color=color, side=ft.BorderSide(1, color),
+                             shape=ft.RoundedRectangleBorder(radius=12)))
+
+
+def _pending_card(inv: dict, on_resend, on_accept, on_cancel_invite) -> ft.Container:
+    code = inv.get("code") or "-"
+    invite_id = inv.get("id")
     return ft.Container(
         bgcolor="#FAF7EC", border=ft.Border.all(1.5, "#E6D5A8"), border_radius=16, padding=14,
-        content=ft.Row(spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
-            _avatar("?"),
-            ft.Column(expand=True, spacing=2, controls=[
-                ft.Text(f"{inv.get('invited_email') or 'invitee'} — pending", size=15,
-                        weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
-                ft.Text(f"invited by {inv.get('method') or 'link'} · code {code} · {inv.get('created_on') or ''}",
-                        size=13, color=T.TEXT_SECONDARY),
+        content=ft.Column(spacing=10, controls=[
+            ft.Row(spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                _avatar("?"),
+                ft.Column(expand=True, spacing=2, controls=[
+                    ft.Text(f"{inv.get('invited_email') or 'invitee'} · pending", size=15,
+                            weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+                    ft.Text(f"invited by {inv.get('method') or 'link'} · code {code} · {inv.get('created_on') or ''}",
+                            size=13, color=T.TEXT_SECONDARY),
+                ]),
             ]),
-            ft.Button(content=ft.Text("Resend", size=12), on_click=lambda _, c=code: on_resend(c),
-                      style=ft.ButtonStyle(bgcolor="#FFFFFF", color="#8F6410",
-                                           side=ft.BorderSide(1, "#E6D5A8"),
-                                           shape=ft.RoundedRectangleBorder(radius=12))),
+            ft.Row(spacing=8, controls=[
+                _small_btn("Add to Circle", lambda _, i=invite_id: on_accept(i), T.GREEN_TEXT),
+                _small_btn("Resend", lambda _, v=inv: on_resend(v), "#8F6410"),
+                _small_btn("Cancel", lambda _, i=invite_id: on_cancel_invite(i), "#B5402C"),
+            ]),
         ]),
     )
 
@@ -87,6 +99,7 @@ def build_circle_shell(
     on_send_invite, on_copy_link, on_resend,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_back_click=None, invite_error: str = "",
+    on_accept=None, on_cancel_invite=None,
 ) -> ft.Container:
     """Render My Circle. UI only; data + callbacks are passed in."""
     invite_input = ft.TextField(
@@ -116,7 +129,7 @@ def build_circle_shell(
         ft.Text("No members yet.", size=13, color=T.TEXT_SECONDARY)]
     if pending:
         members_block.append(ft.Text("Pending invites", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY))
-        members_block += [_pending_card(inv, on_resend) for inv in pending]
+        members_block += [_pending_card(inv, on_resend, on_accept, on_cancel_invite) for inv in pending]
 
     invite_card = ft.Container(
         bgcolor="#FFFFFF", border_radius=18, padding=16,
