@@ -7,9 +7,11 @@ from datetime import date, datetime
 
 
 def parse_mdy(text: str):
-    """Parse 'MM-DD-YYYY' (or with slashes) into a date, or None if invalid."""
+    """Forgiving date parse. Accepts MM-DD-YYYY, MM/DD/YYYY, ISO YYYY-MM-DD, and
+    slashes/single-digit months, so we can auto-reformat whatever the user typed.
+    Returns a date, or None if it truly isn't a real date."""
     text = (text or "").strip()
-    for fmt in ("%m-%d-%Y", "%m/%d/%Y"):
+    for fmt in ("%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:

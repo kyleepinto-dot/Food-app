@@ -135,15 +135,21 @@ def build_share_shell(
                 if d is None:
                     _show_err("Best-by date must look like 10-15-2026.")
                     return
+                if d < date.today():
+                    _show_err("Best-by date can't be in the past.")
+                    return
                 best_by_iso = d.isoformat()
         pdate = ""
         pdate_raw = str(pickup_date_in.value or "").strip()
         if pdate_raw:
             d = dates.parse_mdy(pdate_raw)
             if d is None:
-                _show_err("Pickup date must look like 10-05-2026.")
+                _show_err("Pickup date must be a real date like 10-05-2026.")
                 return
-            pdate = d.strftime("%m-%d-%Y")
+            if d < date.today():
+                _show_err("Pickup date can't be in the past.")
+                return
+            pdate = d.strftime("%m-%d-%Y")   # auto-formatted to MM-DD-YYYY
         ptime = str(pickup_time_dd.value or "").strip()
         if pdate and ptime:
             pickup_window = f"{pdate} at {ptime}"

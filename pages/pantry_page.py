@@ -226,7 +226,10 @@ def _shell(metrics: dict, controls: list[ft.Control], on_home, on_scan, on_me) -
     )
 
 
-def _header(metrics: dict, subtitle: str, on_back=None) -> ft.Container:
+def _header(metrics: dict, subtitle: str, on_back=None, on_people=None) -> ft.Container:
+    people = (ft.IconButton(ft.Icons.GROUP_OUTLINED, icon_color=ThemeColors.GREEN_TEXT, icon_size=26,
+                            tooltip="Me", on_click=on_people)
+              if on_people else ft.Icon(ft.Icons.GROUP_OUTLINED, color=ThemeColors.GREEN_TEXT, size=26))
     return ft.Container(
         bgcolor="#FFFFFF", border_radius=26, padding=ft.Padding(left=12, top=10, right=12, bottom=10),
         content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
@@ -235,7 +238,7 @@ def _header(metrics: dict, subtitle: str, on_back=None) -> ft.Container:
                 ft.Text("PantryIQ Connect", size=24 if metrics["is_desktop"] else 18, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
                 ft.Text(subtitle, size=14, color=ThemeColors.TEXT_SECONDARY, weight=ft.FontWeight.W_600),
             ]),
-            ft.Icon(ft.Icons.GROUP_OUTLINED, color=ThemeColors.GREEN_TEXT, size=26),
+            people,
         ]),
     )
 
@@ -311,7 +314,7 @@ def build_pantry_shell(
         ))
 
     controls = [
-        _header(metrics, "Shared Pantry"),
+        _header(metrics, "Shared Pantry", on_people=on_me_click),
         ft.Container(bgcolor="#DFEBDD", border_radius=18, padding=16, content=ft.Column(spacing=10, controls=[
             ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
                 ft.Column(expand=True, spacing=3, controls=[
@@ -353,20 +356,33 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
     safety = ft.Dropdown(value=str(draft.get("safety_class") or "sealed_packaged"), label="Food type", options=[ft.dropdown.Option(key=k, text=v) for k, v in FOOD_TYPES], border_radius=12, expand=True)
     notes = ft.TextField(value=str(draft.get("notes") or ""), label="Note for the family", multiline=True, min_lines=2, max_lines=3, border_radius=12)
 
+    err = ft.Text("", color="#B5402C", size=13, weight=ft.FontWeight.BOLD, visible=False)
+
+    def _fail(msg, field=None):
+        err.value = msg
+        err.visible = True
+        err.update()
+        if field is not None:
+            field.error_text = msg
+            field.update()
+
     def submit(_):
+        err.visible = False
+        err.update()
         if not str(name.value or "").strip():
-            name.error_text = "Enter an item name"; name.update(); return
+            _fail("Please enter an item name.", name); return
         parsed_date = dates.parse_mdy(best_by.value)
         if parsed_date is None:
-            best_by.error_text = "Use MM-DD-YYYY"; best_by.update(); return
+            _fail("Best-by date must look like 10-15-2026.", best_by); return
         if parsed_date < date.today():
-            best_by.error_text = "Best-by date can't be in the past"; best_by.update(); return
+            _fail("Best-by date can't be in the past — pick today or a future date.", best_by); return
+        best_by.error_text = None
         try:
             parsed_quantity = int(str(quantity.value or "").strip())
             if parsed_quantity <= 0:
                 raise ValueError
         except ValueError:
-            quantity.error_text = "Enter a positive number"; quantity.update(); return
+            _fail("Quantity must be a positive number.", quantity); return
         on_save({**draft, "name": str(name.value).strip(), "best_by": parsed_date.isoformat(),
                  "quantity": parsed_quantity, "unit": str(unit.value or "items"),
                  "location": str(location.value or "Shelf"), "safety_class": str(safety.value or "sealed_packaged"),
@@ -377,6 +393,7 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
         _header(metrics, title, on_cancel),
         ft.Container(bgcolor="#FFFFFF", border_radius=18, padding=16, content=ft.Column(spacing=12, controls=[
             ft.Text(title, size=22, weight=ft.FontWeight.BOLD), ft.Text(source, size=13, color=ThemeColors.TEXT_SECONDARY),
+            err,
             name, ft.Row(spacing=8, controls=[safety, location]), best_by,
             ft.Row(spacing=8, controls=[quantity, unit]), notes,
             ft.Row(alignment=ft.MainAxisAlignment.END, controls=[
