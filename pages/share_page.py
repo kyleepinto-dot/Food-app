@@ -96,6 +96,15 @@ def build_share_shell(
         err.visible = True
         err.update()
 
+    def _reformat(field):
+        parsed = dates.parse_mdy(field.value)
+        if parsed:
+            field.value = parsed.strftime("%m-%d-%Y")
+            field.update()
+    if not locked:
+        best_by_in.on_blur = lambda _: _reformat(best_by_in)
+    pickup_date_in.on_blur = lambda _: _reformat(pickup_date_in)
+
     # Food-type chooser: locked note (from a pantry item) or radios (free share).
     if locked:
         get_safety = lambda: default_safety
@@ -148,6 +157,9 @@ def build_share_shell(
                 return
             if d < date.today():
                 _show_err("Pickup date can't be in the past.")
+                return
+            if best_by_iso and d > date.fromisoformat(best_by_iso):
+                _show_err("Pickup date must be on or before the best-by date, or the food will be past its best-by.")
                 return
             pdate = d.strftime("%m-%d-%Y")   # auto-formatted to MM-DD-YYYY
         ptime = str(pickup_time_dd.value or "").strip()

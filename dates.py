@@ -11,7 +11,7 @@ def parse_mdy(text: str):
     slashes/single-digit months, so we can auto-reformat whatever the user typed.
     Returns a date, or None if it truly isn't a real date."""
     text = (text or "").strip()
-    for fmt in ("%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d"):
+    for fmt in ("%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%m%d%Y", "%Y%m%d"):
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:

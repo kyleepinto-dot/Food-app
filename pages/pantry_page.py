@@ -356,6 +356,14 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
     safety = ft.Dropdown(value=str(draft.get("safety_class") or "sealed_packaged"), label="Food type", options=[ft.dropdown.Option(key=k, text=v) for k, v in FOOD_TYPES], border_radius=12, expand=True)
     notes = ft.TextField(value=str(draft.get("notes") or ""), label="Note for the family", multiline=True, min_lines=2, max_lines=3, border_radius=12)
 
+    def _reformat_best_by(_=None):
+        parsed = dates.parse_mdy(best_by.value)
+        if parsed:
+            best_by.value = parsed.strftime("%m-%d-%Y")
+            best_by.error_text = None
+            best_by.update()
+    best_by.on_blur = _reformat_best_by
+
     err = ft.Text("", color="#B5402C", size=13, weight=ft.FontWeight.BOLD, visible=False)
 
     def _fail(msg, field=None):
