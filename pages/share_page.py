@@ -22,6 +22,7 @@ from datetime import date
 
 import flet as ft
 
+import dates
 from pages.theme import ThemeColors as T
 from pages.shell_kit import app_shell, app_header
 
@@ -72,13 +73,16 @@ def build_share_shell(
         label="Name & quantity — e.g. Veggie pasta bake, serves 4",
         border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
+    locked_best_by_iso = str(draft.get("best_by") or "")  # the item's stored date (ISO)
     best_by_in = ft.TextField(
-        value=str(draft.get("best_by") or ""),
-        label="Best-by date (YYYY-MM-DD)", hint_text="e.g. 2026-10-15",
+        value=dates.iso_to_mdy(locked_best_by_iso),
+        label="Best-by date (from your pantry item)" if locked else "Best-by date (MM-DD-YYYY)",
+        hint_text="e.g. 10-15-2026",
+        read_only=locked, disabled=locked,
         border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
     )
     pickup_date_in = ft.TextField(
-        label="Pickup date (YYYY-MM-DD)", hint_text="e.g. 2026-10-05",
+        label="Pickup date (MM-DD-YYYY)", hint_text="e.g. 10-05-2026",
         border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY, expand=True,
     )
     pickup_time_dd = ft.Dropdown(
@@ -120,20 +124,26 @@ def build_share_shell(
         if not title:
             _show_err("Give it a name & quantity first.")
             return
-        best_by = str(best_by_in.value or "").strip()
-        if best_by:
-            try:
-                date.fromisoformat(best_by)
-            except ValueError:
-                _show_err("Best-by date must look like 2026-10-15.")
+        # Best-by: a locked share uses the item's stored date; a free share parses the field.
+        if locked:
+            best_by_iso = locked_best_by_iso
+        else:
+            raw = str(best_by_in.value or "").strip()
+            best_by_iso = ""
+            if raw:
+                d = dates.parse_mdy(raw)
+                if d is None:
+                    _show_err("Best-by date must look like 10-15-2026.")
+                    return
+                best_by_iso = d.isoformat()
+        pdate = ""
+        pdate_raw = str(pickup_date_in.value or "").strip()
+        if pdate_raw:
+            d = dates.parse_mdy(pdate_raw)
+            if d is None:
+                _show_err("Pickup date must look like 10-05-2026.")
                 return
-        pdate = str(pickup_date_in.value or "").strip()
-        if pdate:
-            try:
-                date.fromisoformat(pdate)
-            except ValueError:
-                _show_err("Pickup date must look like 2026-10-05.")
-                return
+            pdate = d.strftime("%m-%d-%Y")
         ptime = str(pickup_time_dd.value or "").strip()
         if pdate and ptime:
             pickup_window = f"{pdate} at {ptime}"
@@ -145,7 +155,7 @@ def build_share_shell(
             pickup_window = "Flexible - arrange together"
         on_share({
             "title": title, "safety_class": get_safety(),
-            "best_by": best_by, "pickup_window": pickup_window,
+            "best_by": best_by_iso, "pickup_window": pickup_window,
         })
 
     controls = [

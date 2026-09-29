@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 import flet as ft
 
 import db  # unified multi-user data layer (schema.sql owns the tables now)
+import dates  # MM-DD-YYYY <-> ISO helpers
 from pages.theme import ThemeColors
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pantry.db")
@@ -65,6 +66,21 @@ def save_pantry_item(item: dict) -> int:
             ),
         )
         return int(cursor.lastrowid)
+
+
+def update_pantry_item(item_id: int, item: dict) -> None:
+    """Update an existing pantry item's editable fields (from the Edit form)."""
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        con.execute(
+            "UPDATE pantry_items SET name=?, best_by=?, qty=?, unit=?, location=?, "
+            "notes=?, safety_class=? WHERE id=?",
+            (
+                str(item.get("name") or "").strip(), str(item["best_by"]),
+                max(1, int(item.get("quantity") or 1)), str(item.get("unit") or "items"),
+                str(item.get("location") or "Shelf"), str(item.get("notes") or "").strip(),
+                str(item.get("safety_class") or "sealed_packaged"), int(item_id),
+            ),
+        )
 
 
 def get_pantry_items() -> list[dict]:
@@ -325,10 +341,12 @@ def build_pantry_shell(
     return _shell(metrics, controls, on_home_click, on_scan_click, on_me_click)
 
 
-def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_home_click, on_scan_click, on_me_click) -> ft.Container:
-    """Render one shared add form, prefilled when opened from scan results."""
+def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_home_click, on_scan_click, on_me_click,
+                           title: str = "Add to Shared Pantry", save_label: str = "Save to Shared Pantry") -> ft.Container:
+    """Render the shared add/edit form, prefilled when opened from scan or Edit."""
     name = ft.TextField(value=str(draft.get("name") or ""), label="Item name", border_radius=12)
-    best_by = ft.TextField(value=str(draft.get("best_by") or ""), label="Best-by date (YYYY-MM-DD)", border_radius=12)
+    best_by = ft.TextField(value=dates.iso_to_mdy(draft.get("best_by")), label="Best-by date (MM-DD-YYYY)",
+                           hint_text="e.g. 10-15-2026", border_radius=12)
     quantity = ft.TextField(value=str(draft.get("quantity") or 1), label="Quantity", keyboard_type=ft.KeyboardType.NUMBER, border_radius=12, expand=True)
     unit = ft.Dropdown(value=str(draft.get("unit") or "items"), label="Unit", options=[ft.dropdown.Option(key=v, text=v) for v in UNITS], border_radius=12, expand=True)
     location = ft.Dropdown(value=str(draft.get("location") or "Shelf"), label="Location", options=[ft.dropdown.Option(key=v, text=v) for v in LOCATIONS], border_radius=12, expand=True)
@@ -338,10 +356,11 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
     def submit(_):
         if not str(name.value or "").strip():
             name.error_text = "Enter an item name"; name.update(); return
-        try:
-            parsed_date = date.fromisoformat(str(best_by.value or "").strip())
-        except ValueError:
-            best_by.error_text = "Use YYYY-MM-DD"; best_by.update(); return
+        parsed_date = dates.parse_mdy(best_by.value)
+        if parsed_date is None:
+            best_by.error_text = "Use MM-DD-YYYY"; best_by.update(); return
+        if parsed_date < date.today():
+            best_by.error_text = "Best-by date can't be in the past"; best_by.update(); return
         try:
             parsed_quantity = int(str(quantity.value or "").strip())
             if parsed_quantity <= 0:
@@ -353,16 +372,16 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
                  "location": str(location.value or "Shelf"), "safety_class": str(safety.value or "sealed_packaged"),
                  "notes": str(notes.value or "").strip()})
 
-    source = "Review the scanned details before saving." if draft.get("added_via_scan") else "Enter an item to share with your household."
+    source = "Review the scanned details before saving." if draft.get("added_via_scan") else "Enter the item's details."
     controls = [
-        _header(metrics, "Add to Shared Pantry", on_cancel),
+        _header(metrics, title, on_cancel),
         ft.Container(bgcolor="#FFFFFF", border_radius=18, padding=16, content=ft.Column(spacing=12, controls=[
-            ft.Text("Add to Shared Pantry", size=22, weight=ft.FontWeight.BOLD), ft.Text(source, size=13, color=ThemeColors.TEXT_SECONDARY),
+            ft.Text(title, size=22, weight=ft.FontWeight.BOLD), ft.Text(source, size=13, color=ThemeColors.TEXT_SECONDARY),
             name, ft.Row(spacing=8, controls=[safety, location]), best_by,
             ft.Row(spacing=8, controls=[quantity, unit]), notes,
             ft.Row(alignment=ft.MainAxisAlignment.END, controls=[
                 ft.Button(content=ft.Text("Cancel"), on_click=on_cancel, style=ft.ButtonStyle(bgcolor="#EEF1EE")),
-                ft.Button(content=ft.Text("Save to Shared Pantry"), on_click=submit, style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color="#FFFFFF")),
+                ft.Button(content=ft.Text(save_label), on_click=submit, style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color="#FFFFFF")),
             ]),
         ])),
     ]
@@ -372,6 +391,7 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
 def build_pantry_item_options_shell(
     metrics: dict, item: dict, on_back_click, on_save_note, on_discard,
     on_use, on_share, on_donate, on_home_click, on_scan_click, on_me_click,
+    on_edit=None,
 ) -> ft.Container:
     """Render food-safety-aware actions and note editing for one item."""
     safety_key = str(item.get("safety_class") or "sealed_packaged")
@@ -391,6 +411,9 @@ def build_pantry_item_options_shell(
                 ]),
                 ft.Container(bgcolor=tint, border_radius=20, padding=8, content=ft.Text(expiry, color=strong, weight=ft.FontWeight.BOLD, size=12)),
             ]),
+            ft.Text(f"Best by {dates.iso_to_mdy(item['best_by'])}", size=13, color=ThemeColors.TEXT_SECONDARY),
+            ft.Button(content=ft.Text("✏️ Edit item details"), on_click=(lambda _: on_edit(item)) if on_edit else None,
+                      disabled=on_edit is None, style=outline),
             ft.Divider(color=ThemeColors.DIVIDER), ft.Text("What do you want to do with it?", weight=ft.FontWeight.BOLD),
             ft.Button(content=ft.Text("🍳 Use it — see recipes"), on_click=on_use, style=ft.ButtonStyle(bgcolor=ThemeColors.BRAND_PRIMARY, color="#FFFFFF")),
             ft.Button(content=ft.Text(f"🤝 {share_label}"), on_click=lambda _: on_share(item), style=outline),

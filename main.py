@@ -21,6 +21,7 @@ from pages.pantry_page import (
     pantry_items_for_meals,
     save_pantry_item,
     scanned_product_draft,
+    update_pantry_item,
     update_pantry_note,
     update_pantry_quantity,
 )
@@ -498,6 +499,13 @@ def main(page: ft.Page):
             page.update()
             return
 
+        if view_state["current"] == "pantry_edit":
+            scanner_controller.stop_camera()
+            page.clean()
+            page.add(build_edit_pantry_view())
+            page.update()
+            return
+
         if view_state["current"] == "meals":
             scanner_controller.stop_camera()
             page.clean()
@@ -567,6 +575,19 @@ def main(page: ft.Page):
         view_state["selected_pantry_item_id"] = item_id
         view_state["current"] = "pantry_item"
         render_current_view()
+
+    def show_edit_pantry_item(item) -> None:
+        view_state["edit_item_id"] = int(item["id"])
+        view_state["current"] = "pantry_edit"
+        render_current_view()
+
+    def save_edited_pantry_item(item: dict) -> None:
+        item_id = view_state.get("edit_item_id")
+        update_pantry_item(item_id, item)
+        view_state["pantry_products"] = get_pantry_items()
+        invalidate_meal_plan()
+        show_message(f"Updated {item.get('name', 'item')}.")
+        show_pantry_item(item_id)
 
     def save_pantry_note(item_id: int, note: str) -> None:
         update_pantry_note(item_id, note)
@@ -877,6 +898,34 @@ def main(page: ft.Page):
             on_home_click=show_home,
             on_scan_click=show_scan,
             on_me_click=show_me,
+            on_edit=show_edit_pantry_item,
+        )
+
+    def build_edit_pantry_view() -> ft.Container:
+        """Reuse the Add form to EDIT an existing item, prefilled with its values."""
+        item_id = int(view_state.get("edit_item_id") or 0)
+        item = get_pantry_item(item_id)
+        if item is None:
+            return build_pantry_view()
+        draft = {
+            "name": item.get("name") or "",
+            "best_by": item.get("best_by") or "",
+            "quantity": item.get("qty") or 1,
+            "unit": item.get("unit") or "items",
+            "location": item.get("location") or "Shelf",
+            "safety_class": item.get("safety_class") or "sealed_packaged",
+            "notes": item.get("notes") or "",
+        }
+        return build_add_pantry_shell(
+            metrics=get_layout_metrics(),
+            draft=draft,
+            on_save=save_edited_pantry_item,
+            on_cancel=lambda _=None: show_pantry_item(item_id),
+            on_home_click=show_home,
+            on_scan_click=show_scan,
+            on_me_click=show_me,
+            title="Edit item",
+            save_label="Save changes",
         )
 
     def build_meal_plan_view() -> ft.Container:
