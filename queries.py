@@ -360,3 +360,14 @@ def accept_invite(invite_id):
     name = con.execute("SELECT name FROM users WHERE id = ?", (user_id,)).fetchone()["name"]
     con.close()
     return name
+
+
+def get_my_shares(user_id):
+    """Every share this user has posted, newest first (for the My Shares screen)."""
+    con = _connect()
+    rows = con.execute(
+        "SELECT * FROM shares WHERE shared_by = ? ORDER BY created_on DESC, id DESC",
+        (user_id,),
+    ).fetchall()
+    con.close()
+    return rows

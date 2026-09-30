@@ -36,7 +36,7 @@ def build_impact_shell(
     metrics: dict, profile: dict, stats: dict, activity: list,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_logout, on_settings=None, on_back_click=None, on_circle=None,
-    on_share=None, on_donate=None,
+    on_share=None, on_donate=None, on_my_shares=None,
 ) -> ft.Container:
     """Render the Impact / profile screen. UI only; data is passed in."""
     name = str(profile.get("name") or "Member")
@@ -126,15 +126,19 @@ def build_impact_shell(
     hub_buttons = []
     if on_circle:
         hub_buttons.append(_hub_btn("👥  My Circle", on_circle))
+    if on_my_shares:
+        hub_buttons.append(_hub_btn("📋  My Shares", on_my_shares))
     if on_share:
         hub_buttons.append(_hub_btn("🤝  Share food", on_share))
     if on_donate:
         hub_buttons.append(_hub_btn("🏦  Donate", on_donate))
+    # Lay hub buttons two per row so 3-4 of them fit a phone width comfortably.
+    hub_rows = [ft.Row(spacing=8, controls=hub_buttons[i:i + 2]) for i in range(0, len(hub_buttons), 2)]
     actions_card = ft.Container(
         bgcolor="#FFFFFF", border_radius=18, padding=16,
         content=ft.Column(spacing=10, controls=[
             ft.Text("Community", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
-            ft.Row(spacing=8, controls=hub_buttons),
+            *hub_rows,
         ]),
     ) if hub_buttons else ft.Container()
 

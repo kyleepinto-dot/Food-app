@@ -238,3 +238,44 @@ def build_share_shell(
         ]),
     ]
     return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)
+
+
+def build_my_shares_shell(
+    metrics: dict, shares: list, on_back,
+    on_home_click, on_scan_click, on_pantry_click, on_me_click,
+) -> ft.Container:
+    """List the food this user has posted to share, with who can see each item."""
+    cards = []
+    for s in shares:
+        safety = str(s.get("safety_class") or "homemade_or_opened")
+        status = str(s.get("status") or "available")
+        cards.append(ft.Container(
+            bgcolor="#FFFFFF", border=ft.Border.all(1, "#E1E7E2"), border_radius=16, padding=14,
+            content=ft.Column(spacing=6, controls=[
+                ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.START, controls=[
+                    ft.Text(str(s.get("title") or "Shared item"), size=15, weight=ft.FontWeight.BOLD,
+                            color=T.TEXT_PRIMARY, expand=True),
+                    ft.Container(bgcolor=T.GREEN_SURFACE_SOFT, border_radius=999,
+                                 padding=ft.Padding(left=10, top=4, right=10, bottom=4),
+                                 content=ft.Text(status.replace("_", " "), size=11, weight=ft.FontWeight.BOLD, color=T.GREEN_TEXT)),
+                ]),
+                ft.Text(f"👀 Who can see it: {audience_text(safety)}", size=13, color=T.TEXT_SECONDARY),
+                ft.Text(f"🕒 Pickup: {s.get('pickup_window') or 'flexible'}", size=13, color=T.TEXT_SECONDARY),
+                ft.Text(f"Shared on {s.get('created_on') or ''}", size=12, color=T.TEXT_INACTIVE),
+            ]),
+        ))
+    if not cards:
+        cards = [ft.Container(
+            bgcolor="#FFFFFF", border_radius=16, padding=22, alignment=ft.Alignment(0, 0),
+            content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6, controls=[
+                ft.Text("🤝", size=34),
+                ft.Text("You haven't shared anything yet", weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+                ft.Text("Share a pantry item and it'll show up here.", size=13, color=T.TEXT_SECONDARY),
+            ]),
+        )]
+    controls = [
+        app_header(metrics, "My Shares", on_back),
+        ft.Text("Food you've offered to share, and who can see each one.", size=13, color=T.TEXT_SECONDARY),
+        *cards,
+    ]
+    return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)
