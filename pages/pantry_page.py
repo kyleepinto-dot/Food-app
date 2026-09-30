@@ -323,7 +323,7 @@ def build_pantry_shell(
                     ft.Text("Your Shared Pantry", size=26 if metrics["is_desktop"] else 21, weight=ft.FontWeight.BOLD),
                     ft.Text("Use, share, or donate food before it expires.", size=13, color=ThemeColors.TEXT_SECONDARY),
                 ]),
-                ft.Container(bgcolor="#FFFFFF", border_radius=12, padding=9, content=ft.Text(f"{total} items", weight=ft.FontWeight.BOLD)),
+                ft.Container(bgcolor="#FFFFFF", border_radius=12, padding=9, content=ft.Text(f"{total} item" + ("" if total == 1 else "s"), weight=ft.FontWeight.BOLD)),
             ]),
             ft.Row(spacing=8, controls=[
                 ft.Button(expand=True, content=ft.Text("Scan to add", weight=ft.FontWeight.BOLD), on_click=on_scan_click,
