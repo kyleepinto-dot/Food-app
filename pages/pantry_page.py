@@ -290,7 +290,7 @@ def build_pantry_shell(
                 ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[
                     ft.Column(expand=True, spacing=3, controls=[
                         ft.Text(str(item.get("name") or "Food item"), size=16, weight=ft.FontWeight.BOLD),
-                        ft.Text(f"{item.get('location')} · {safety['label']} · best by {item.get('best_by')}", size=12, color=ThemeColors.TEXT_SECONDARY),
+                        ft.Text(f"{item.get('location')} · {safety['label']} · best by {dates.iso_to_mdy(item.get('best_by'))}", size=12, color=ThemeColors.TEXT_SECONDARY),
                         ft.Text(str(item.get("notes")), size=12, color="#8F6410") if item.get("notes") else ft.Container(),
                     ]),
                     ft.Container(bgcolor=tint, border_radius=20, padding=7, content=ft.Text(expiry, size=11, color=strong, weight=ft.FontWeight.BOLD)),

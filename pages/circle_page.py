@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import flet as ft
 
+import dates
 from pages.theme import ThemeColors as T
 from pages.shell_kit import app_shell, app_header
 
@@ -83,7 +84,7 @@ def _pending_card(inv: dict, on_resend, on_accept, on_cancel_invite) -> ft.Conta
                 ft.Column(expand=True, spacing=2, controls=[
                     ft.Text(f"{inv.get('invited_email') or 'invitee'} · pending", size=15,
                             weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
-                    ft.Text(f"invited by {inv.get('method') or 'link'} · code {code} · {inv.get('created_on') or ''}",
+                    ft.Text(f"invited by {inv.get('method') or 'link'} · code {code} · {dates.iso_to_mdy(inv.get('created_on')) or inv.get('created_on') or ''}",
                             size=13, color=T.TEXT_SECONDARY),
                 ]),
             ]),
@@ -187,7 +188,7 @@ def build_member_detail_shell(
         rows.append(info_row("Distance", f"{member['distance_mi']} mi"))
     rows.append(info_row("Food shared", f"{int(member.get('shared_count') or 0)} items"))
     if member.get("joined_on"):
-        rows.append(info_row("Member since", member["joined_on"]))
+        rows.append(info_row("Member since", dates.iso_to_mdy(member["joined_on"]) or member["joined_on"]))
 
     header_card = ft.Container(
         bgcolor="#FFFFFF", border_radius=18, padding=18,

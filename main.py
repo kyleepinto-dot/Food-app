@@ -32,6 +32,7 @@ import db
 import queries
 import session
 import email_service
+import dates
 from pages.pantry_page import set_current_user
 from pages.welcome_page import build_welcome_shell
 from pages.impact_page import build_impact_shell
@@ -1035,7 +1036,7 @@ def main(page: ft.Page):
         since = "new member"
         try:
             if "joined_on" in user.keys() and user["joined_on"]:
-                since = "member since " + str(user["joined_on"])
+                since = "member since " + (dates.iso_to_mdy(user["joined_on"]) or str(user["joined_on"]))
         except Exception:
             pass
         profile = {"name": name, "since_text": since, "circle_size": queries.get_circle_size(uid)}

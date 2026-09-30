@@ -11,11 +11,21 @@ def parse_mdy(text: str):
     slashes/single-digit months, so we can auto-reformat whatever the user typed.
     Returns a date, or None if it truly isn't a real date."""
     text = (text or "").strip()
-    for fmt in ("%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%m%d%Y", "%Y%m%d"):
+    # Separator formats (dash or slash): 4-digit year first, then 2-digit year
+    # (so "10-05-26" becomes 2026 automatically; Python maps 00-68 -> 2000-2068).
+    for fmt in ("%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%m-%d-%y", "%m/%d/%y"):
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+    # Pure digits: decide by LENGTH (avoids %Y being greedy) — 8 = MMDDYYYY, 6 = MMDDYY.
+    if text.isdigit():
+        fmt = {8: "%m%d%Y", 6: "%m%d%y"}.get(len(text))
+        if fmt:
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                return None
     return None
 
 

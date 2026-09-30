@@ -261,7 +261,7 @@ def build_my_shares_shell(
                 ]),
                 ft.Text(f"👀 Who can see it: {audience_text(safety)}", size=13, color=T.TEXT_SECONDARY),
                 ft.Text(f"🕒 Pickup: {s.get('pickup_window') or 'flexible'}", size=13, color=T.TEXT_SECONDARY),
-                ft.Text(f"Shared on {s.get('created_on') or ''}", size=12, color=T.TEXT_INACTIVE),
+                ft.Text(f"Shared on {dates.iso_to_mdy(s.get('created_on')) or s.get('created_on') or ''}", size=12, color=T.TEXT_INACTIVE),
             ]),
         ))
     if not cards:
