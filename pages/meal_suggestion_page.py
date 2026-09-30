@@ -41,19 +41,19 @@ def _priority_card(item: dict, position: int) -> ft.Container:
     )
 
 
-def _meal_detail_content(suggestion: dict, image_url: str) -> list[ft.Control]:
+def _meal_detail_content(suggestion: dict, image_source: str | bytes, images_loading: bool) -> list[ft.Control]:
     pantry_items = [str(value) for value in suggestion.get("pantry_items_used") or []]
     ingredients = [value for value in suggestion.get("ingredients") or [] if isinstance(value, dict)]
     directions = [str(value) for value in suggestion.get("directions") or []]
     controls: list[ft.Control] = []
 
-    if image_url:
+    if image_source:
         controls.append(
             ft.Container(
                 height=190,
                 border_radius=16,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                content=ft.Image(src=image_url, fit=ft.BoxFit.COVER, width=1024, height=190),
+                content=ft.Image(src=image_source, fit=ft.BoxFit.COVER, width=1024, height=190),
             )
         )
     else:
@@ -68,7 +68,11 @@ def _meal_detail_content(suggestion: dict, image_url: str) -> list[ft.Control]:
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Icon(ft.Icons.IMAGE_OUTLINED, color=ThemeColors.GREEN_TEXT, size=30),
-                        ft.Text("Creating an AI meal photo...", size=12, color=ThemeColors.TEXT_SECONDARY),
+                        ft.Text(
+                            "Preparing meal photo..." if images_loading else "Meal photo unavailable",
+                            size=12,
+                            color=ThemeColors.TEXT_SECONDARY,
+                        ),
                     ],
                 ),
             )
@@ -82,7 +86,7 @@ def _meal_detail_content(suggestion: dict, image_url: str) -> list[ft.Control]:
                 spacing=6,
                 controls=[
                     ft.Icon(ft.Icons.SCHEDULE, size=16, color=ThemeColors.GREEN_TEXT),
-                    ft.Text(str(suggestion.get("prep_time") or "About 30 minutes"), size=12, weight=ft.FontWeight.W_600),
+                    ft.Text(str(suggestion.get("prep_time") or "Time estimate unavailable"), size=12, weight=ft.FontWeight.W_600),
                 ],
             ),
             ft.Divider(height=1, color=ThemeColors.DIVIDER),
@@ -162,7 +166,6 @@ def build_meal_suggestion_shell(
     on_me_click,
     ranked_items: list[dict],
     meal_state: dict,
-    demo_number: int,
     on_meal_click,
     on_back_to_list_click,
     on_refresh_click,
@@ -172,7 +175,8 @@ def build_meal_suggestion_shell(
     compact_nav = metrics["shell_width"] < 360
     status = str(meal_state.get("status") or "idle")
     suggestions = [item for item in meal_state.get("suggestions") or [] if isinstance(item, dict)]
-    image_urls = [str(value or "") for value in meal_state.get("image_urls") or []]
+    image_sources = [value if isinstance(value, (str, bytes)) else "" for value in meal_state.get("image_urls") or []]
+    images_loading = bool(meal_state.get("images_loading"))
     selected_value = meal_state.get("selected_index")
     selected_index = selected_value if isinstance(selected_value, int) and 0 <= selected_value < len(suggestions) else None
 
@@ -206,8 +210,8 @@ def build_meal_suggestion_shell(
     else:
         if selected_index is not None:
             selected_suggestion = suggestions[selected_index]
-            image_url = image_urls[selected_index] if selected_index < len(image_urls) else ""
-            planner_controls = _meal_detail_content(selected_suggestion, image_url)
+            image_source = image_sources[selected_index] if selected_index < len(image_sources) else ""
+            planner_controls = _meal_detail_content(selected_suggestion, image_source, images_loading)
         else:
             planner_controls = [
                 ft.Text(
@@ -224,10 +228,10 @@ def build_meal_suggestion_shell(
             ]
             for index, suggestion in enumerate(suggestions):
                 pantry_items = [str(value) for value in suggestion.get("pantry_items_used") or []]
-                thumbnail_url = image_urls[index] if index < len(image_urls) else ""
+                thumbnail_source = image_sources[index] if index < len(image_sources) else ""
                 thumbnail = (
-                    ft.Image(src=thumbnail_url, width=64, height=64, fit=ft.BoxFit.COVER)
-                    if thumbnail_url
+                    ft.Image(src=thumbnail_source, width=64, height=64, fit=ft.BoxFit.COVER)
+                    if thumbnail_source
                     else ft.Container(
                         width=64,
                         height=64,
@@ -319,18 +323,7 @@ def build_meal_suggestion_shell(
             content=ft.Column(
                 spacing=7,
                 controls=[
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        controls=[
-                            ft.Text("Expiring first to last", size=17, weight=ft.FontWeight.BOLD),
-                            ft.Container(
-                                bgcolor="#FFFFFF",
-                                border_radius=10,
-                                padding=ft.Padding(left=8, top=5, right=8, bottom=5),
-                                content=ft.Text(f"Dummy page {demo_number}", size=11, weight=ft.FontWeight.BOLD),
-                            ) if demo_number > 0 else ft.Container(),
-                        ],
-                    ),
+                    ft.Text("Expiring first to last", size=17, weight=ft.FontWeight.BOLD),
                     ft.Text(
                         "Foods are sorted from the item to use soonest to the item that lasts longest.",
                         size=12,

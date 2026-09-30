@@ -1,5 +1,7 @@
 import flet as ft
 import asyncio
+import json
+import os
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
@@ -39,7 +41,7 @@ from pages.impact_page import build_impact_shell
 from pages.circle_page import build_circle_shell, build_member_detail_shell
 from pages.share_page import build_share_shell, build_my_shares_shell
 from pages.donate_page import build_donate_shell, build_dashboard_shell
-from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url
+from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url, build_meal_fallback_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
 from pages.product_info_page import build_product_info_shell
 from pages.theme import ThemeColors
@@ -82,11 +84,9 @@ def main(page: ft.Page):
         "pantry_draft": None,
         "selected_pantry_item_id": None,
         "ai_profile_cache": {},
-        "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None},
+        "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "images_loading": False, "selected_index": None},
         "meal_request_version": 0,
-        "meal_demo_number": 0,
         "meal_inventory": [],
-        "meal_is_dummy": False,
         "profile": {
             "name": "Jamie Carter",
             "membership": "Community Member",
@@ -157,51 +157,32 @@ def main(page: ft.Page):
         """Discard a plan whenever pantry contents change."""
 
         view_state["meal_request_version"] = int(view_state.get("meal_request_version") or 0) + 1
-        view_state["meal_plan"] = {"status": "idle", "suggestions": [], "image_urls": [], "selected_index": None}
+        view_state["meal_plan"] = {"status": "idle", "suggestions": [], "image_urls": [], "images_loading": False, "selected_index": None}
 
     def build_meal_inventory() -> list[dict]:
         """Read persistent pantry rows in the meal planner's inventory format."""
 
         return pantry_items_for_meals(get_pantry_items())
 
-    def build_dummy_meal_inventory(demo_number: int) -> list[dict]:
-        """Return a rotating sample pantry so repeated clicks create new demos."""
+    def meal_inventory_signature(inventory: list[dict]) -> tuple:
+        """Return the pantry fields that determine whether a cached plan is reusable."""
 
-        demo_sets = [
-            [
-                ("Baby spinach", "Produce", 1, "1 day", "High Risk"),
-                ("Chicken breast", "Meat", 2, "2 days", "High Risk"),
-                ("Greek yogurt", "Dairy", 1, "4 days", "Medium Risk"),
-                ("Brown rice", "Whole grain", 1, "3 months", "Low Risk"),
-            ],
-            [
-                ("Ripe tomatoes", "Produce", 4, "1 day", "High Risk"),
-                ("Black beans", "Protein", 1, "5 days", "Medium Risk"),
-                ("Corn tortillas", "Whole grain", 6, "8 days", "Medium Risk"),
-                ("Frozen corn", "Vegetable", 1, "2 months", "Low Risk"),
-            ],
-            [
-                ("Fresh mushrooms", "Produce", 1, "2 days", "High Risk"),
-                ("Firm tofu", "Plant protein", 1, "4 days", "Medium Risk"),
-                ("Broccoli", "Vegetable", 2, "6 days", "Medium Risk"),
-                ("Whole-wheat noodles", "Whole grain", 1, "4 months", "Low Risk"),
-            ],
-        ]
-        selected_set = demo_sets[(demo_number - 1) % len(demo_sets)]
-        return [
-            {
-                "key": f"demo:{demo_number}:{index}",
-                "name": name,
-                "category": category,
-                "quantity": quantity,
-                "freshness": "Demo item",
-                "storage": "Demo pantry",
-                "added_at": datetime.now(timezone.utc).isoformat(),
-                "shelf_life": shelf_life,
-                "risk": risk,
-            }
-            for index, (name, category, quantity, shelf_life, risk) in enumerate(selected_set)
-        ]
+        return tuple(
+            (
+                str(item.get("key") or ""),
+                str(item.get("name") or ""),
+                int(item.get("quantity") or 0),
+                str(item.get("shelf_life") or ""),
+                str(item.get("risk") or ""),
+            )
+            for item in inventory
+            if isinstance(item, dict)
+        )
+
+    def meal_inventory_cache_key(inventory: list[dict]) -> str:
+        """Serialize the stable pantry fields used to validate cached meals."""
+
+        return json.dumps(meal_inventory_signature(inventory), separators=(",", ":"), ensure_ascii=True)
 
     def add_product_to_pantry(quantity_value=1) -> None:
         """Open the Shared Pantry form prefilled from the current scan result."""
@@ -227,16 +208,21 @@ def main(page: ft.Page):
         """Persist a quantity adjustment and refresh Shared Pantry totals."""
 
         update_pantry_quantity(item_id, amount)
+        pantry_inventory_changed()
+
+        if view_state.get("current") == "pantry":
+            render_current_view()
+
+    def pantry_inventory_changed() -> None:
+        """Refresh pantry state and silently regenerate meals and their AI images."""
+
         view_state["pantry_products"] = get_pantry_items()
-        invalidate_meal_plan()
+        preload_current_meal_plan()
         profile = view_state.get("profile")
         if isinstance(profile, dict):
             profile["pantry_item_count"] = sum(
                 int(item.get("qty") or 0) for item in view_state["pantry_products"]
             )
-
-        if view_state.get("current") == "pantry":
-            render_current_view()
 
     def warm_image_url(url: str) -> bool:
         """Best-effort warm-up so generated image is likely ready by display time."""
@@ -255,6 +241,23 @@ def main(page: ft.Page):
             return True
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
             return False
+
+    def fetch_image_data(url: str) -> bytes | None:
+        """Download an AI image for portable display and local persistence."""
+
+        headers = {"User-Agent": "PantryIQ-Connect/1.0 (github.com/kyleepinto-dot/Food-app)"}
+        api_key = os.getenv("POLLINATIONS_API_KEY", "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                if not str(response.headers.get("Content-Type") or "").lower().startswith("image/"):
+                    return None
+                image_data = response.read(8_000_001)
+                return image_data if 0 < len(image_data) <= 8_000_000 else None
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+            return None
 
     async def hydrate_ai_image_async(product: dict, barcode_hint: str):
         """Attach AI image URL after initial product page render.
@@ -278,7 +281,6 @@ def main(page: ft.Page):
             return
 
         product["ai_image_url"] = ai_image_url
-        product["show_ai_first"] = True
 
         # Refresh only when the same product page is currently visible.
         if view_state.get("current") == "product" and view_state.get("product") is product:
@@ -337,23 +339,11 @@ def main(page: ft.Page):
         if view_state.get("current") == "product" and view_state.get("product") is product:
             render_current_view()
 
-    async def hydrate_meal_plan_async(inventory: list[dict], request_version: int):
-        """Generate several meals, then hydrate their AI photos concurrently."""
+    async def hydrate_meal_images_async(
+        suggestions: list[dict], request_version: int, user_id: int, cache_key: str
+    ) -> None:
+        """Download missing meal images concurrently and cache each completed image."""
 
-        suggestions = await asyncio.to_thread(fetch_ai_meal_suggestions, inventory)
-        if request_version != view_state.get("meal_request_version"):
-            return
-
-        meal_plan = view_state.get("meal_plan") or {}
-        meal_plan["suggestions"] = suggestions
-        meal_plan["status"] = "ready" if suggestions else "idle"
-        meal_plan["image_urls"] = []
-        view_state["meal_plan"] = meal_plan
-        if view_state.get("current") == "meals":
-            render_current_view()
-
-        if not suggestions:
-            return
         image_urls = [
             build_ai_meal_image_url(
                 str(suggestion.get("title") or "Healthy pantry meal"),
@@ -365,15 +355,79 @@ def main(page: ft.Page):
             ) or ""
             for suggestion in suggestions
         ]
-        warm_results = await asyncio.gather(
-            *(asyncio.to_thread(warm_image_url, url) if url else asyncio.sleep(0, result=False) for url in image_urls)
-        )
+        fallback_urls = [
+            build_meal_fallback_image_url(str(suggestion.get("title") or "Healthy pantry meal"))
+            for suggestion in suggestions
+        ]
+        meal_plan = view_state.get("meal_plan") or {}
+        existing_sources = list(meal_plan.get("image_urls") or [])
+        existing_sources.extend("" for _ in range(max(0, len(image_urls) - len(existing_sources))))
+        meal_plan["image_urls"] = existing_sources[:len(image_urls)]
+        meal_plan["images_loading"] = True
+        view_state["meal_plan"] = meal_plan
+
+        async def download_meal_image(
+            index: int, ai_url: str, fallback_url: str
+        ) -> tuple[int, bytes | None]:
+            image_data = None
+            if os.getenv("POLLINATIONS_API_KEY", "").strip() and ai_url:
+                image_data = await asyncio.to_thread(fetch_image_data, ai_url)
+            if image_data is None:
+                image_data = await asyncio.to_thread(fetch_image_data, fallback_url)
+            return index, image_data
+
+        tasks = [
+            download_meal_image(index, url, fallback_urls[index])
+            for index, url in enumerate(image_urls)
+            if not meal_plan["image_urls"][index]
+        ]
+        for completed_task in asyncio.as_completed(tasks):
+            index, image_data = await completed_task
+            if request_version != view_state.get("meal_request_version"):
+                return
+            if image_data is None:
+                continue
+            current_plan = view_state.get("meal_plan") or {}
+            current_urls = list(current_plan.get("image_urls") or [])
+            if index >= len(current_urls):
+                continue
+            current_urls[index] = image_data
+            current_plan["image_urls"] = current_urls
+            view_state["meal_plan"] = current_plan
+            db.save_meal_plan_image(user_id, cache_key, index, image_data)
+            if view_state.get("current") == "meals":
+                render_current_view()
+
+        if request_version != view_state.get("meal_request_version"):
+            return
+        meal_plan = view_state.get("meal_plan") or {}
+        meal_plan["images_loading"] = False
+        view_state["meal_plan"] = meal_plan
+        if view_state.get("current") == "meals":
+            render_current_view()
+
+    async def hydrate_meal_plan_async(inventory: list[dict], request_version: int):
+        """Generate several meals, then hydrate and persist their AI photos."""
+
+        user_id = int(view_state.get("user_id") or 0)
+        cache_key = meal_inventory_cache_key(inventory)
+        suggestions = await asyncio.to_thread(fetch_ai_meal_suggestions, inventory, request_version)
         if request_version != view_state.get("meal_request_version"):
             return
 
-        meal_plan["image_urls"] = [url if warmed else "" for url, warmed in zip(image_urls, warm_results)]
+        meal_plan = view_state.get("meal_plan") or {}
+        meal_plan["suggestions"] = suggestions
+        meal_plan["status"] = "ready" if suggestions else "idle"
+        meal_plan["image_urls"] = ["" for _ in suggestions]
+        meal_plan["images_loading"] = bool(suggestions)
+        view_state["meal_plan"] = meal_plan
+        if suggestions and user_id:
+            db.save_meal_plan_cache(user_id, cache_key, suggestions)
         if view_state.get("current") == "meals":
             render_current_view()
+
+        if suggestions and user_id:
+            await hydrate_meal_images_async(suggestions, request_version, user_id, cache_key)
 
     def get_layout_metrics() -> dict:
         """Return responsive measurements consumed by both screen builders.
@@ -563,14 +617,8 @@ def main(page: ft.Page):
         """Persist a completed Shared Pantry form and refresh dependent views."""
 
         save_pantry_item(item)
-        view_state["pantry_products"] = get_pantry_items()
         view_state["pantry_draft"] = None
-        invalidate_meal_plan()
-        profile = view_state.get("profile")
-        if isinstance(profile, dict):
-            profile["pantry_item_count"] = sum(
-                int(row.get("qty") or 0) for row in view_state["pantry_products"]
-            )
+        pantry_inventory_changed()
         show_message(f"{item.get('name', 'Item')} saved to Shared Pantry.")
         show_pantry()
 
@@ -599,8 +647,7 @@ def main(page: ft.Page):
 
     def discard_shared_pantry_item(item_id: int) -> None:
         discard_pantry_item(item_id)
-        view_state["pantry_products"] = get_pantry_items()
-        invalidate_meal_plan()
+        pantry_inventory_changed()
         show_message("Item removed and logged as composted/discarded.")
         show_pantry()
 
@@ -637,46 +684,90 @@ def main(page: ft.Page):
         render_current_view()
 
     def show_meal_planner(_=None):
-        """Open the planner with the user's current pantry inventory."""
+        """Open the current pantry plan, reusing launch-time background work."""
 
-        invalidate_meal_plan()
         inventory = build_meal_inventory()
-        view_state["meal_inventory"] = inventory
-        view_state["meal_is_dummy"] = False
-        start_meal_request(inventory)
-
-    def show_dummy_meal_planner(_=None):
-        """Open a new rotating dummy pantry page on every button click."""
-
-        invalidate_meal_plan()
-        demo_number = int(view_state.get("meal_demo_number") or 0) + 1
-        view_state["meal_demo_number"] = demo_number
-        inventory = build_dummy_meal_inventory(demo_number)
-        view_state["meal_inventory"] = inventory
-        view_state["meal_is_dummy"] = True
-        start_meal_request(inventory)
-
-    def start_meal_request(inventory: list[dict]) -> None:
-        """Render a planner inventory and asynchronously request its meals."""
-
-        meal_plan = view_state.get("meal_plan") or {}
-        view_state["current"] = "meals"
-        if not inventory:
+        current_inventory = [item for item in view_state.get("meal_inventory") or [] if isinstance(item, dict)]
+        plan_status = str((view_state.get("meal_plan") or {}).get("status") or "idle")
+        can_reuse = (
+            meal_inventory_signature(current_inventory) == meal_inventory_signature(inventory)
+            and plan_status in {"loading", "ready"}
+        )
+        if can_reuse:
+            view_state["current"] = "meals"
             render_current_view()
             return
+
+        invalidate_meal_plan()
+        schedule_meal_request(inventory, navigate=True)
+
+    def schedule_meal_request(inventory: list[dict], navigate: bool) -> None:
+        """Generate a meal plan with optional navigation to its loading view."""
+
+        meal_plan = view_state.get("meal_plan") or {}
+        view_state["meal_inventory"] = inventory
+        if navigate:
+            view_state["current"] = "meals"
         request_version = int(view_state.get("meal_request_version") or 0) + 1
         view_state["meal_request_version"] = request_version
+        if not inventory:
+            meal_plan["status"] = "idle"
+            meal_plan["suggestions"] = []
+            meal_plan["image_urls"] = []
+            meal_plan["images_loading"] = False
+            view_state["meal_plan"] = meal_plan
+            if navigate:
+                render_current_view()
+            return
         meal_plan["status"] = "loading"
+        meal_plan["suggestions"] = []
+        meal_plan["image_urls"] = []
+        meal_plan["images_loading"] = False
+        meal_plan["selected_index"] = None
         view_state["meal_plan"] = meal_plan
-        render_current_view()
+        if navigate:
+            render_current_view()
         page.run_task(hydrate_meal_plan_async, inventory, request_version)
+
+    def preload_current_meal_plan() -> None:
+        """Start meal and image generation without leaving the current screen."""
+
+        inventory = build_meal_inventory()
+        user_id = int(view_state.get("user_id") or 0)
+        cache_key = meal_inventory_cache_key(inventory)
+        cached_plan = db.load_meal_plan_cache(user_id, cache_key) if user_id and inventory else None
+        if isinstance(cached_plan, dict):
+            suggestions = [item for item in cached_plan.get("suggestions") or [] if isinstance(item, dict)]
+            image_sources = list(cached_plan.get("image_sources") or [])
+            if suggestions:
+                request_version = int(view_state.get("meal_request_version") or 0) + 1
+                view_state["meal_request_version"] = request_version
+                view_state["meal_inventory"] = inventory
+                has_missing_images = len(image_sources) < len(suggestions) or any(not value for value in image_sources)
+                view_state["meal_plan"] = {
+                    "status": "ready",
+                    "suggestions": suggestions,
+                    "image_urls": image_sources,
+                    "images_loading": has_missing_images,
+                    "selected_index": None,
+                }
+                if has_missing_images:
+                    page.run_task(
+                        hydrate_meal_images_async,
+                        suggestions,
+                        request_version,
+                        user_id,
+                        cache_key,
+                    )
+                return
+        schedule_meal_request(inventory, navigate=False)
 
     def refresh_meal_plan(_=None):
         """Request a new group of meals using the currently displayed inventory."""
 
         inventory = [item for item in view_state.get("meal_inventory") or [] if isinstance(item, dict)]
         invalidate_meal_plan()
-        start_meal_request(inventory)
+        schedule_meal_request(inventory, navigate=True)
 
     def select_meal_suggestion(index: int) -> None:
         """Open complete ingredients and directions for one suggested dish."""
@@ -855,7 +946,6 @@ def main(page: ft.Page):
             on_scan_click=show_scan,
             on_me_click=show_me,
             on_meal_planner_click=show_meal_planner,
-            on_dummy_meal_planner_click=show_dummy_meal_planner,
             pantry_products=get_pantry_items(),
             on_quantity_change=change_pantry_quantity,
             on_add_manual_click=show_manual_pantry_add,
@@ -944,7 +1034,6 @@ def main(page: ft.Page):
             on_me_click=show_me,
             ranked_items=rank_pantry_items(inventory),
             meal_state=view_state.get("meal_plan") or {},
-            demo_number=int(view_state.get("meal_demo_number") or 1) if view_state.get("meal_is_dummy") else 0,
             on_meal_click=select_meal_suggestion,
             on_back_to_list_click=show_meal_suggestion_list,
             on_refresh_click=refresh_meal_plan,
@@ -962,6 +1051,7 @@ def main(page: ft.Page):
         view_state["welcome_error"] = ""
         view_state["current"] = "home"
         render_current_view()
+        preload_current_meal_plan()
 
     def welcome_submit(values: dict) -> None:
         if values["mode"] == "reset":
@@ -1222,6 +1312,7 @@ def main(page: ft.Page):
             if not item or not bank:
                 return
             did = db.create_donation(uid, item["id"], bank["id"], dropoff_window=bank.get("schedule"))
+            pantry_inventory_changed()
             qty = item.get("qty")
             sel["pass"] = {"id": did, "bank_id": bank["id"], "bank": bank["name"],
                            "window": bank.get("schedule"),
@@ -1281,6 +1372,8 @@ def main(page: ft.Page):
     if view_state.get("user_id"):
         view_state["current"] = "home"
     render_current_view()
+    if view_state.get("user_id"):
+        preload_current_meal_plan()
 
 
 ft.run(main)

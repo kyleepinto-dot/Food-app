@@ -13,7 +13,9 @@ version (a "hash"). See _hash_password() below for the plain-words explanation.
 import os
 import hmac
 import hashlib
+import json
 import sqlite3
+from contextlib import closing
 from datetime import date, datetime
 
 
@@ -115,6 +117,76 @@ def init_db():
 
     con.commit()
     con.close()
+
+
+def save_meal_plan_cache(user_id: int, inventory_signature: str, suggestions: list[dict]) -> None:
+    """Persist one user's latest plan and clear images from its prior version."""
+
+    payload = json.dumps(suggestions, separators=(",", ":"), ensure_ascii=True)
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        con.execute(
+            "DELETE FROM meal_plan_images WHERE user_id=? AND inventory_signature=?",
+            (user_id, inventory_signature),
+        )
+        con.execute(
+            """INSERT INTO meal_plan_cache
+               (user_id, inventory_signature, suggestions_json, updated_on)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(user_id, inventory_signature) DO UPDATE SET
+                   suggestions_json=excluded.suggestions_json,
+                   updated_on=excluded.updated_on""",
+            (user_id, inventory_signature, payload),
+        )
+        con.execute(
+            "DELETE FROM meal_plan_images WHERE user_id=? AND inventory_signature<>?",
+            (user_id, inventory_signature),
+        )
+        con.execute(
+            "DELETE FROM meal_plan_cache WHERE user_id=? AND inventory_signature<>?",
+            (user_id, inventory_signature),
+        )
+
+
+def save_meal_plan_image(user_id: int, inventory_signature: str, image_index: int, image_data: bytes) -> None:
+    """Persist one completed meal image without waiting for the other images."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        con.execute(
+            """INSERT INTO meal_plan_images
+               (user_id, inventory_signature, image_index, image_data)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id, inventory_signature, image_index) DO UPDATE SET
+                   image_data=excluded.image_data""",
+            (user_id, inventory_signature, image_index, image_data),
+        )
+
+
+def load_meal_plan_cache(user_id: int, inventory_signature: str) -> dict | None:
+    """Load suggestions and aligned image bytes for an unchanged pantry."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con:
+        row = con.execute(
+            "SELECT suggestions_json FROM meal_plan_cache WHERE user_id=? AND inventory_signature=?",
+            (user_id, inventory_signature),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            suggestions = json.loads(str(row[0]))
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(suggestions, list) or not suggestions:
+            return None
+        images: list[bytes | str] = ["" for _ in suggestions]
+        image_rows = con.execute(
+            """SELECT image_index, image_data FROM meal_plan_images
+               WHERE user_id=? AND inventory_signature=?""",
+            (user_id, inventory_signature),
+        ).fetchall()
+    for image_index, image_data in image_rows:
+        if isinstance(image_index, int) and 0 <= image_index < len(images) and isinstance(image_data, bytes):
+            images[image_index] = image_data
+    return {"suggestions": suggestions, "image_sources": images}
 
 
 # ---------------------------------------------------------------------------

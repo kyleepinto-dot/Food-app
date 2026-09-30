@@ -2,6 +2,30 @@ import hashlib
 import urllib.parse
 
 
+_MEAL_FALLBACK_PHOTOS = {
+    "salad": "photo-1546069901-ba9599a7e63c",
+    "pasta": "photo-1473093295043-cdd812d0e601",
+    "soup": "photo-1547592166-23ac45744acd",
+    "taco": "photo-1551504734-5ee1c4a1479b",
+    "roast": "photo-1504674900247-0877df9cc836",
+    "skillet": "photo-1600891964092-4316c288032e",
+}
+
+
+def build_meal_fallback_image_url(meal_name: str) -> str:
+    """Return a stable food photo suited to the meal's cooking style."""
+
+    title = str(meal_name or "").casefold()
+    photo_id = next(
+        (photo for keyword, photo in _MEAL_FALLBACK_PHOTOS.items() if keyword in title),
+        _MEAL_FALLBACK_PHOTOS["roast"],
+    )
+    return (
+        f"https://images.unsplash.com/{photo_id}"
+        "?auto=format&fit=crop&w=1024&h=768&q=80"
+    )
+
+
 def build_ai_food_image_url(food_name: str, barcode: str | None = None) -> str | None:
     """Return an AI-generated image URL for a food item name.
 
@@ -30,7 +54,6 @@ def build_ai_food_image_url(food_name: str, barcode: str | None = None) -> str |
             "width": 1024,
             "height": 1024,
             "seed": seed,
-            "nologo": "true",
         }
     )
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?{params}"
@@ -58,7 +81,6 @@ def build_ai_meal_image_url(meal_name: str, ingredients: list[str]) -> str | Non
             "width": 1024,
             "height": 768,
             "seed": seed,
-            "nologo": "true",
         }
     )
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?{params}"

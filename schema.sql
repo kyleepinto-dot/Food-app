@@ -178,3 +178,27 @@ CREATE TABLE IF NOT EXISTS donations (
     FOREIGN KEY (donated_by)   REFERENCES users(id),
     FOREIGN KEY (food_bank_id) REFERENCES food_banks(id)
 );
+
+
+-- Cached AI meal plans --------------------------------------------------------
+-- A pantry signature prevents suggestions from being reused after inventory
+-- changes. Images are stored as bytes so authenticated provider URLs and
+-- temporary remote failures do not affect later app launches.
+CREATE TABLE IF NOT EXISTS meal_plan_cache (
+    user_id             INTEGER NOT NULL,
+    inventory_signature TEXT NOT NULL,
+    suggestions_json    TEXT NOT NULL,
+    updated_on           TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, inventory_signature),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS meal_plan_images (
+    user_id             INTEGER NOT NULL,
+    inventory_signature TEXT NOT NULL,
+    image_index         INTEGER NOT NULL,
+    image_data          BLOB NOT NULL,
+    PRIMARY KEY (user_id, inventory_signature, image_index),
+    FOREIGN KEY (user_id, inventory_signature)
+        REFERENCES meal_plan_cache(user_id, inventory_signature)
+);

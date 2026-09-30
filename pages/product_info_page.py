@@ -416,11 +416,6 @@ def build_product_info_shell(
     image_control: ft.Control
     if image_sources:
         initial_index = 0
-        if bool(product.get("show_ai_first")):
-            for i, source in enumerate(image_sources):
-                if source.get("label") == "AI Image":
-                    initial_index = i
-                    break
 
         active_image = {"index": initial_index}
         gallery_image = ft.Image(src=image_sources[initial_index]["url"], height=210)

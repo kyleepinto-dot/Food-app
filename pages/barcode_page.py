@@ -40,6 +40,7 @@ class BarcodeScannerController:
         self.streaming_supported = False
         self.status_text = None
         self.result_text = None
+        self.camera_action_button = None
         self.capture_button = None
         self.manual_entry_field = None
         self.debug_log_field = None
@@ -57,6 +58,7 @@ class BarcodeScannerController:
         self.camera = controls["camera"]
         self.status_text = controls["status_text"]
         self.result_text = controls["result_text"]
+        self.camera_action_button = controls.get("camera_action_button")
         self.capture_button = controls["capture_button"]
         self.manual_entry_field = controls.get("manual_entry_field")
         self.debug_log_field = controls.get("debug_log_field")
@@ -66,6 +68,14 @@ class BarcodeScannerController:
         self.last_failed_barcode = None
         self.lookup_in_progress = False
         self.append_debug("bind_controls", "Scan controls bound successfully")
+
+    def set_camera_action_state(self, camera_active: bool) -> None:
+        # One stable action control changes label and behavior with the camera
+        # lifecycle, avoiding separate Start and Stop buttons in the layout.
+        if self.camera_action_button is None:
+            return
+        self.camera_action_button.data = "stop" if camera_active else "start"
+        self.camera_action_button.content = ft.Text("Stop Camera" if camera_active else "Start Camera")
 
     def append_debug(self, step: str, message: str):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -404,10 +414,17 @@ class BarcodeScannerController:
             self.status_text.value = "Requesting camera access..."
         if self.result_text is not None:
             self.result_text.value = "Opening the camera..."
+        self.set_camera_action_state(True)
         self.page.update()
 
         if self.camera is None:
             self.append_debug("start_camera", "Camera control is not available on this page")
+            self.set_camera_action_state(False)
+            if self.status_text is not None:
+                self.status_text.value = "Camera preview unavailable"
+            if self.result_text is not None:
+                self.result_text.value = "Use Android, iOS, or Web to scan with the camera."
+            self.page.update()
             return
 
         try:
@@ -428,6 +445,7 @@ class BarcodeScannerController:
                                 self.result_text.value = "Camera access is restricted by this device."
                             else:
                                 self.result_text.value = "Allow camera access to scan a barcode."
+                        self.set_camera_action_state(False)
                         self.page.update()
                         return
 
@@ -472,6 +490,7 @@ class BarcodeScannerController:
             # Distinguish browser permission/network constraints from native
             # camera errors for clearer user guidance.
             self.running = False
+            self.set_camera_action_state(False)
             if self.status_text is not None:
                 if bool(getattr(self.page, "web", False)):
                     self.status_text.value = "Camera unavailable in browser"
@@ -503,6 +522,7 @@ class BarcodeScannerController:
     def stop_camera(self):
         # Reset state first so UI and handlers treat camera as inactive.
         self.running = False
+        self.set_camera_action_state(False)
         self.append_debug("stop_camera", "Stop requested")
 
         if self.camera is not None:
@@ -562,8 +582,21 @@ def build_scan_shell(
 
     camera = fc.Camera(preview_enabled=True, expand=True) if camera_is_supported else None
 
+    def toggle_camera(e):
+        clicked_button = cast(ft.Button, e.control)
+        if clicked_button.data == "stop":
+            on_stop_camera(e)
+        else:
+            on_start_camera(e)
+
+    camera_action_button = ft.Button(
+        content=ft.Text("Start Camera"),
+        data="start",
+        on_click=toggle_camera,
+        style=ft.ButtonStyle(bgcolor="#2E5D4E", color=ThemeColors.BRAND_ON_PRIMARY),
+    )
+
     if camera_is_supported:
-        # Scanner control actions remain unchanged; only visual composition is updated.
         capture_button = ft.Button(
             content=ft.Text("Take Photo"),
             disabled=True,
@@ -576,16 +609,7 @@ def build_scan_shell(
         action_controls: list[ft.Control] = cast(
             list[ft.Control],
             [
-                ft.Button(
-                    content=ft.Text("Start Camera"),
-                    on_click=on_start_camera,
-                    style=ft.ButtonStyle(bgcolor="#2E5D4E", color=ThemeColors.BRAND_ON_PRIMARY),
-                ),
-                ft.Button(
-                    content=ft.Text("Stop Camera"),
-                    on_click=on_stop_camera,
-                    style=ft.ButtonStyle(bgcolor="#ECEFF3", color="#101010"),
-                ),
+                camera_action_button,
                 capture_button,
             ],
         )
@@ -599,6 +623,7 @@ def build_scan_shell(
         action_controls = cast(
             list[ft.Control],
             [
+                camera_action_button,
                 ft.Button(
                     content=ft.Text("Back Home"),
                     on_click=on_back_click,
@@ -617,6 +642,50 @@ def build_scan_shell(
         )
 
     preview_frame_width = int(metrics["shell_width"] * (0.9 if metrics["is_desktop"] else 0.92))
+    scanner_surface_height = 350 if metrics["is_desktop"] else 300
+    scan_window_height = 135 if metrics["is_desktop"] else 110
+    scan_window_top = int((scanner_surface_height - scan_window_height) / 2) + 14
+    scan_window_side = 80 if metrics["is_desktop"] else 36
+    mask_color = "#78000000"
+
+    # Four translucent panels leave a clear barcode-sized opening. A separate
+    # rounded border keeps the target crisp without dimming the camera inside.
+    scan_guide_overlay = ft.Stack(
+        expand=True,
+        visible=camera_is_supported,
+        controls=[
+            ft.Container(top=0, left=0, right=0, height=scan_window_top, bgcolor=mask_color),
+            ft.Container(
+                top=scan_window_top,
+                left=0,
+                width=scan_window_side,
+                height=scan_window_height,
+                bgcolor=mask_color,
+            ),
+            ft.Container(
+                top=scan_window_top,
+                right=0,
+                width=scan_window_side,
+                height=scan_window_height,
+                bgcolor=mask_color,
+            ),
+            ft.Container(
+                top=scan_window_top + scan_window_height,
+                left=0,
+                right=0,
+                bottom=0,
+                bgcolor=mask_color,
+            ),
+            ft.Container(
+                top=scan_window_top,
+                left=scan_window_side,
+                right=scan_window_side,
+                height=scan_window_height,
+                border=ft.Border.all(3, "#FFFFFF"),
+                border_radius=18,
+            ),
+        ],
+    )
 
     lookup_overlay = ft.Container(
         visible=False,
@@ -644,7 +713,7 @@ def build_scan_shell(
     )
 
     scanner_surface = ft.Container(
-        height=350 if metrics["is_desktop"] else 300,
+        height=scanner_surface_height,
         border_radius=22,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         bgcolor="#FFFFFF",
@@ -660,6 +729,7 @@ def build_scan_shell(
                         content=preview_content,
                     ),
                 ),
+                scan_guide_overlay,
                 ft.Container(
                     top=14,
                     left=0,
@@ -1123,6 +1193,7 @@ def build_scan_shell(
         "camera": camera,
         "status_text": status_text,
         "result_text": result_text,
+        "camera_action_button": camera_action_button,
         "capture_button": capture_button,
         "manual_entry_field": manual_entry_field,
         "lookup_overlay": lookup_overlay,

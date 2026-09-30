@@ -125,6 +125,23 @@ class FoodSafetyTests(unittest.TestCase):
             stored, "homemade_or_opened",
             "The share was allowed to be less safe than its pantry item!")
 
+    def test_meal_plan_cache_requires_the_same_pantry_signature(self):
+        owner = db.create_account("Planner", "planner@x.com", "pass1234")
+        suggestions = [{
+            "title": "Cached Lentil Soup",
+            "ingredients": [{"name": "Lentils", "amount": "1 cup"}],
+            "directions": ["Simmer until tender."],
+        }]
+
+        db.save_meal_plan_cache(owner, "pantry-signature-a", suggestions)
+        db.save_meal_plan_image(owner, "pantry-signature-a", 0, b"image-bytes")
+
+        cached = db.load_meal_plan_cache(owner, "pantry-signature-a")
+        self.assertIsNotNone(cached)
+        self.assertEqual(suggestions, cached["suggestions"])
+        self.assertEqual([b"image-bytes"], cached["image_sources"])
+        self.assertIsNone(db.load_meal_plan_cache(owner, "pantry-signature-b"))
+
 
 if __name__ == "__main__":
     # verbosity=2 prints each test name with 'ok' or 'FAIL' next to it.

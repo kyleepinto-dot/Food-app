@@ -101,6 +101,23 @@ For web mode:
 flet run --web main.py
 ```
 
+## AI Meal Images
+
+Pollinations currently requires authenticated credit for new AI image
+generations. Without a token, the app automatically uses a relevant meal photo
+for each dish. For local or debug runs that require generated AI images, provide
+a token through the environment before starting the app:
+
+```powershell
+$env:POLLINATIONS_API_KEY="your-token"
+python main.py
+```
+
+Do not commit the token or embed it in an Android/iOS build. Production mobile
+builds should call an authenticated backend proxy. Meal suggestions and any
+successfully downloaded images are cached in the local `pantry.db` and reused
+while the signed-in user's pantry signature remains unchanged.
+
 ## Debugging in Visual Studio Code
 
 1. Open the project folder in Visual Studio Code.
