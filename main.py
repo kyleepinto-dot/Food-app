@@ -964,6 +964,15 @@ def main(page: ft.Page):
         render_current_view()
 
     def welcome_submit(values: dict) -> None:
+        if values["mode"] == "reset":
+            if db.set_password(values["email"], values["password"]):
+                view_state["welcome_error"] = ""
+                view_state["welcome_mode"] = "signin"
+                show_message("Password updated — please sign in with your new password.")
+            else:
+                view_state["welcome_error"] = "No account found with that email."
+            render_current_view()
+            return
         try:
             if values["mode"] == "create":
                 uid = db.create_account(values["name"], values["email"], values["password"])
@@ -985,7 +994,12 @@ def main(page: ft.Page):
 
     def welcome_switch() -> None:
         current = view_state.get("welcome_mode", "signin")
-        view_state["welcome_mode"] = "signin" if current == "create" else "create"
+        view_state["welcome_mode"] = "signin" if current in ("create", "reset") else "create"
+        view_state["welcome_error"] = ""
+        render_current_view()
+
+    def show_forgot() -> None:
+        view_state["welcome_mode"] = "reset"
         view_state["welcome_error"] = ""
         render_current_view()
 
@@ -1025,7 +1039,7 @@ def main(page: ft.Page):
         return build_welcome_shell(
             metrics, view_state.get("welcome_mode", "signin"),
             on_submit=welcome_submit, on_switch=welcome_switch,
-            error=view_state.get("welcome_error", ""),
+            error=view_state.get("welcome_error", ""), on_forgot=show_forgot,
         )
 
     def build_impact_view() -> ft.Container:

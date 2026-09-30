@@ -199,6 +199,23 @@ def check_login(email, password):
     return None
 
 
+def set_password(email, new_password) -> bool:
+    """Reset the password for an existing account (by email). Returns True if an
+    account with that email exists and was updated, False otherwise. Used by the
+    'Forgot password' flow — the new password is hashed, never stored in plain text."""
+    email = (email or "").strip().lower()
+    salt_hex, hash_hex = _hash_password(new_password)
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT id FROM users WHERE lower(email) = ?", (email,)).fetchone()
+    if row is None:
+        con.close()
+        return False
+    con.execute("UPDATE users SET pw_salt=?, pw_hash=? WHERE id=?", (salt_hex, hash_hex, row[0]))
+    con.commit()
+    con.close()
+    return True
+
+
 def get_user(user_id):
     """Look up one user by id (used to confirm a saved session is still valid)."""
     con = sqlite3.connect(DB_PATH)

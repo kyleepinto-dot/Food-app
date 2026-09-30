@@ -27,9 +27,11 @@ def _brand_chip(text: str) -> ft.Container:
     )
 
 
-def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: str = "") -> ft.Container:
-    """Render the Welcome screen (sign in OR create account). UI only."""
+def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: str = "",
+                        on_forgot=None) -> ft.Container:
+    """Render the Welcome screen (sign in / create account / reset password). UI only."""
     creating = mode == "create"
+    resetting = mode == "reset"
 
     err = ft.Text(error, size=13, color="#B5402C", visible=bool(error))
 
@@ -41,12 +43,19 @@ def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: s
 
     name_in = field("Your name")
     email_in = field("Email…")
-    pw_in = field("Password…", password=True)
+    pw_in = field("New password (min 4)…" if resetting else "Password…", password=True)
 
     def submit(_):
         email = str(email_in.value or "").strip()
         pw = str(pw_in.value or "")
-        if creating:
+        if resetting:
+            if not email or not pw:
+                err.value = "Enter your email and a new password."
+                err.visible = True; err.update(); return
+            if len(pw) < 4:
+                err.value = "Pick a password at least 4 characters long."
+                err.visible = True; err.update(); return
+        elif creating:
             name = str(name_in.value or "").strip()
             if not name or not email or not pw:
                 err.value = "Please fill in your name, email, and password."
@@ -80,10 +89,17 @@ def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: s
         ]),
     )
 
-    # ── sign-in / create card (below) ──
-    title = "Create your account" if creating else "Welcome back"
-    button_label = "Create account" if creating else "Sign in"
+    # ── sign-in / create / reset card (below) ──
+    title = {"create": "Create your account", "reset": "Reset your password"}.get(mode, "Welcome back")
+    button_label = {"create": "Create account", "reset": "Set new password"}.get(mode, "Sign in")
+
+    def link(text, cb):
+        return ft.Container(on_click=lambda _: cb(),
+                            content=ft.Text(text, size=13, weight=ft.FontWeight.BOLD, color=T.GREEN_TEXT))
+
     card_controls: list[ft.Control] = [ft.Text(title, size=22, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY)]
+    if resetting:
+        card_controls.append(ft.Text("Enter your email and choose a new password.", size=13, color=T.TEXT_SECONDARY))
     if creating:
         card_controls.append(name_in)
     card_controls += [
@@ -91,13 +107,18 @@ def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: s
         ft.Button(content=ft.Text(button_label, weight=ft.FontWeight.BOLD), on_click=submit,
                   style=ft.ButtonStyle(bgcolor=T.BRAND_PRIMARY, color="#FFFFFF",
                                        shape=ft.RoundedRectangleBorder(radius=13))),
-        ft.Row(spacing=4, alignment=ft.MainAxisAlignment.CENTER, controls=[
-            ft.Text("Already have an account?" if creating else "New here?", size=13, color=T.TEXT_SECONDARY),
-            ft.Container(on_click=lambda _: on_switch(),
-                         content=ft.Text("Sign in" if creating else "Create an account",
-                                         size=13, weight=ft.FontWeight.BOLD, color=T.GREEN_TEXT)),
-        ]),
     ]
+    if resetting:
+        card_controls.append(ft.Row(spacing=4, alignment=ft.MainAxisAlignment.CENTER,
+                                    controls=[link("← Back to sign in", on_switch)]))
+    else:
+        if not creating and on_forgot:
+            card_controls.append(ft.Row(alignment=ft.MainAxisAlignment.CENTER,
+                                        controls=[link("Forgot password?", on_forgot)]))
+        card_controls.append(ft.Row(spacing=4, alignment=ft.MainAxisAlignment.CENTER, controls=[
+            ft.Text("Already have an account?" if creating else "New here?", size=13, color=T.TEXT_SECONDARY),
+            link("Sign in" if creating else "Create an account", on_switch),
+        ]))
     card = ft.Container(bgcolor="#FFFFFF", border_radius=22, padding=24,
                         content=ft.Column(spacing=14, controls=card_controls))
 
