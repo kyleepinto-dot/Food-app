@@ -35,7 +35,7 @@ import email_service
 from pages.pantry_page import set_current_user
 from pages.welcome_page import build_welcome_shell
 from pages.impact_page import build_impact_shell
-from pages.circle_page import build_circle_shell
+from pages.circle_page import build_circle_shell, build_member_detail_shell
 from pages.share_page import build_share_shell
 from pages.donate_page import build_donate_shell, build_dashboard_shell
 from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url
@@ -444,7 +444,7 @@ def main(page: ft.Page):
             return
 
         # Yaashvi's integrated screens (each reads its data from view_state).
-        if view_state["current"] in ("circle", "share", "donate", "dashboard", "impact"):
+        if view_state["current"] in ("circle", "share", "donate", "dashboard", "impact", "member_detail"):
             scanner_controller.stop_camera()
             page.clean()
             page.add({
@@ -453,6 +453,7 @@ def main(page: ft.Page):
                 "donate": build_donate_view,
                 "dashboard": build_dashboard_view,
                 "impact": build_impact_view,
+                "member_detail": build_member_detail_view,
             }[view_state["current"]]())
             page.update()
             return
@@ -1007,6 +1008,11 @@ def main(page: ft.Page):
         view_state["current"] = "dashboard"
         render_current_view()
 
+    def show_member(member) -> None:
+        view_state["member_id"] = int(member["id"])
+        view_state["current"] = "member_detail"
+        render_current_view()
+
     # ─── View builders for the integrated screens ─────────────────────────
     def build_welcome_view() -> ft.Container:
         metrics = get_layout_metrics()
@@ -1110,6 +1116,29 @@ def main(page: ft.Page):
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me, on_back_click=show_me,
             on_accept=on_accept, on_cancel_invite=on_cancel_invite,
+            on_member_click=show_member,
+        )
+
+    def build_member_detail_view() -> ft.Container:
+        uid = view_state["user_id"]
+        user = db.get_user(uid)
+        circle = queries.get_or_create_circle(uid, user["name"] if user else "Member")
+        member = queries.get_circle_member(circle["id"], view_state.get("member_id"))
+        if member is None:
+            view_state["current"] = "circle"
+            return build_circle_view()
+
+        def on_delete(m) -> None:
+            removed = queries.remove_circle_member(circle["id"], int(m["id"]))
+            show_message(f"Removed {m['name']} from your Circle." if removed
+                         else "That member can't be removed.")
+            view_state["current"] = "circle"
+            render_current_view()
+
+        return build_member_detail_shell(
+            get_layout_metrics(), dict(member), on_delete=on_delete, on_back=show_circle,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me,
         )
 
     def build_share_view() -> ft.Container:

@@ -45,11 +45,13 @@ def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compac
     nav_item_controls: list[ft.Control] = [ft.Icon(icon=icon, color=icon_color, size=24)]
     if not compact:
         nav_item_controls.append(ft.Text(label, size=12, color=text_color, weight=weight))
-    return ft.Column(
+    col = ft.Column(
         spacing=2 if not compact else 0,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         controls=nav_item_controls,
     )
+    return ft.Container(content=col, border_radius=14, padding=ft.Padding(left=14, top=6, right=14, bottom=6),
+                        bgcolor=ThemeColors.GREEN_SURFACE_SOFT if selected else None)
 
 
 def build_home_shell(

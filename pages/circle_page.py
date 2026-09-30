@@ -35,7 +35,7 @@ def _chip(text: str, bg: str, fg: str) -> ft.Container:
     )
 
 
-def _member_card(m: dict) -> ft.Container:
+def _member_card(m: dict, on_click=None) -> ft.Container:
     is_owner = str(m.get("role")) == "owner"
     if is_owner:
         subtitle = f"owner of this Circle · shared {int(m.get('shared_count') or 0)} items"
@@ -51,6 +51,7 @@ def _member_card(m: dict) -> ft.Container:
         tag = _chip("active", "#E7F0E0", T.GREEN_TEXT)
     return ft.Container(
         bgcolor="#FFFFFF", border=ft.Border.all(1, "#E1E7E2"), border_radius=16, padding=14,
+        on_click=(lambda _, mm=m: on_click(mm)) if on_click else None, ink=bool(on_click),
         content=ft.Row(spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
             _avatar((str(m.get("name") or "?")[:1] or "?").upper()),
             ft.Column(expand=True, spacing=2, controls=[
@@ -58,6 +59,7 @@ def _member_card(m: dict) -> ft.Container:
                 ft.Text(subtitle, size=13, color=T.TEXT_SECONDARY),
             ]),
             tag,
+            ft.Icon(ft.Icons.CHEVRON_RIGHT, color=T.TEXT_INACTIVE, size=20) if on_click else ft.Container(),
         ]),
     )
 
@@ -99,7 +101,7 @@ def build_circle_shell(
     on_send_invite, on_resend,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_back_click=None, invite_error: str = "",
-    on_accept=None, on_cancel_invite=None,
+    on_accept=None, on_cancel_invite=None, on_member_click=None,
 ) -> ft.Container:
     """Render My Circle. UI only; data + callbacks are passed in."""
     name_input = ft.TextField(
@@ -129,7 +131,7 @@ def build_circle_shell(
                   T.GREEN_SURFACE_SOFT, T.GREEN_TEXT),
         ]),
     ]
-    members_block += [_member_card(m) for m in members] or [
+    members_block += [_member_card(m, on_member_click) for m in members] or [
         ft.Text("No members yet.", size=13, color=T.TEXT_SECONDARY)]
     if pending:
         members_block.append(ft.Text("Pending invites", size=15, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY))
@@ -159,4 +161,57 @@ def build_circle_shell(
         invite_card,
         trust_note,
     ]
+    return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)
+
+
+def build_member_detail_shell(
+    metrics: dict, member: dict, on_delete, on_back,
+    on_home_click, on_scan_click, on_pantry_click, on_me_click,
+) -> ft.Container:
+    """A member's profile: their info plus a Remove-from-Circle action."""
+    is_owner = str(member.get("role")) == "owner"
+    name = str(member.get("name") or "Member")
+
+    def info_row(label, value):
+        return ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
+            ft.Text(label, size=13, color=T.TEXT_SECONDARY),
+            ft.Text(str(value), size=14, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+        ])
+
+    rows = [info_row("Role", "Owner (that's you)" if is_owner else "Circle member")]
+    if member.get("email"):
+        rows.append(info_row("Email", member["email"]))
+    if member.get("relation"):
+        rows.append(info_row("Relation", member["relation"]))
+    if member.get("distance_mi") is not None:
+        rows.append(info_row("Distance", f"{member['distance_mi']} mi"))
+    rows.append(info_row("Food shared", f"{int(member.get('shared_count') or 0)} items"))
+    if member.get("joined_on"):
+        rows.append(info_row("Member since", member["joined_on"]))
+
+    header_card = ft.Container(
+        bgcolor="#FFFFFF", border_radius=18, padding=18,
+        content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8, controls=[
+            ft.Container(width=72, height=72, bgcolor=T.GREEN_SURFACE_SOFT, border_radius=999,
+                         alignment=ft.Alignment(0, 0),
+                         content=ft.Text((name[:1] or "?").upper(), size=30, weight=ft.FontWeight.BOLD, color=T.GREEN_TEXT)),
+            ft.Text(name, size=20, weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+            _chip("Owner" if is_owner else "Circle member", T.GREEN_SURFACE_SOFT, T.GREEN_TEXT),
+        ]),
+    )
+    info_card = ft.Container(bgcolor="#FFFFFF", border_radius=18, padding=18,
+                            content=ft.Column(spacing=12, controls=rows))
+
+    if is_owner:
+        action = ft.Container(bgcolor="#F7E9C8", border_radius=12, padding=12,
+                              content=ft.Text("This is you — you can't remove yourself from your own Circle.",
+                                              size=13, color="#7A570E"))
+    else:
+        action = ft.Button(
+            content=ft.Text("🗑  Remove from Circle", weight=ft.FontWeight.BOLD),
+            on_click=lambda _: on_delete(member),
+            style=ft.ButtonStyle(bgcolor="#FBE9E5", color="#B5402C",
+                                 shape=ft.RoundedRectangleBorder(radius=13)))
+
+    controls = [app_header(metrics, name, on_back), header_card, info_card, action]
     return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)

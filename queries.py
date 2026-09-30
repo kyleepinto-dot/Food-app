@@ -70,6 +70,40 @@ def get_circle_members(circle_id):
     return rows
 
 
+def get_circle_member(circle_id, user_id):
+    """One member's details for the member-detail screen."""
+    con = _connect()
+    row = con.execute(
+        """
+        SELECT u.id, u.name, u.email, u.joined_on, cm.role, cm.relation, cm.distance_mi,
+               (SELECT COUNT(*) FROM shares s WHERE s.shared_by = u.id) AS shared_count
+        FROM circle_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.circle_id = ? AND cm.user_id = ?
+        """,
+        (circle_id, user_id),
+    ).fetchone()
+    con.close()
+    return row
+
+
+def remove_circle_member(circle_id, user_id):
+    """Remove a member from THIS circle (never the owner). The user row itself is
+    left alone. Returns True if a member was removed."""
+    con = _connect()
+    role = con.execute(
+        "SELECT role FROM circle_members WHERE circle_id = ? AND user_id = ?",
+        (circle_id, user_id),
+    ).fetchone()
+    if role is None or role["role"] == "owner":
+        con.close()
+        return False
+    con.execute("DELETE FROM circle_members WHERE circle_id = ? AND user_id = ?",
+                (circle_id, user_id))
+    con.commit()
+    con.close()
+    return True
+
+
 def get_pending_invites(circle_id):
     """Invites that haven't been accepted yet, newest first."""
     con = _connect()

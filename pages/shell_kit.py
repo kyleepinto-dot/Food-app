@@ -22,7 +22,9 @@ def nav_item(icon: ft.IconData, label: str, selected: bool, compact: bool) -> ft
     if not compact:
         controls.append(ft.Text(label, size=12, color=color,
                                 weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500))
-    return ft.Column(spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=controls)
+    col = ft.Column(spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=controls)
+    return ft.Container(content=col, border_radius=14, padding=ft.Padding(left=14, top=6, right=14, bottom=6),
+                        bgcolor=T.GREEN_SURFACE_SOFT if selected else None)
 
 
 def app_header(metrics: dict, subtitle: str, on_back=None) -> ft.Container:
