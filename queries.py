@@ -349,6 +349,25 @@ def accept_invite(invite_id):
             "VALUES (?, ?, 'member', 'Circle member')",
             (circle_id, user_id),
         )
+    # Reciprocal Circle: also add the circle's OWNER into the new member's own
+    # circle, so when that member signs in they see the owner in their Circle too.
+    owner_row = con.execute("SELECT owner_id FROM circles WHERE id = ?", (circle_id,)).fetchone()
+    if owner_row and owner_row["owner_id"] != user_id:
+        o_id = owner_row["owner_id"]
+        mc = con.execute("SELECT id FROM circles WHERE owner_id = ? ORDER BY id LIMIT 1", (user_id,)).fetchone()
+        if mc is None:
+            cur = con.execute("INSERT INTO circles (name, owner_id) VALUES (?, ?)",
+                              (f"{display_name}'s Circle", user_id))
+            member_circle_id = cur.lastrowid
+            con.execute("INSERT INTO circle_members (circle_id, user_id, role) VALUES (?, ?, 'owner')",
+                        (member_circle_id, user_id))
+        else:
+            member_circle_id = mc["id"]
+        rev = con.execute("SELECT 1 FROM circle_members WHERE circle_id = ? AND user_id = ?",
+                          (member_circle_id, o_id)).fetchone()
+        if not rev:
+            con.execute("INSERT INTO circle_members (circle_id, user_id, role, relation) "
+                        "VALUES (?, ?, 'member', 'Circle member')", (member_circle_id, o_id))
     # Clear THIS invite AND any other still-pending invites for the same email in
     # this circle, so accepting one duplicate makes the rest disappear too.
     con.execute(
