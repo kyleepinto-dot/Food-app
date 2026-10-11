@@ -36,7 +36,7 @@ def build_impact_shell(
     metrics: dict, profile: dict, stats: dict, activity: list,
     on_home_click, on_scan_click, on_pantry_click, on_me_click,
     on_logout, on_settings=None, on_back_click=None, on_circle=None,
-    on_share=None, on_donate=None, on_my_shares=None,
+    on_share=None, on_donate=None, on_my_shares=None, on_shared_with_me=None,
 ) -> ft.Container:
     """Render the Impact / profile screen. UI only; data is passed in."""
     name = str(profile.get("name") or "Member")
@@ -126,6 +126,8 @@ def build_impact_shell(
     hub_buttons = []
     if on_circle:
         hub_buttons.append(_hub_btn("👥  My Circle", on_circle))
+    if on_shared_with_me:
+        hub_buttons.append(_hub_btn("🎁  Shared with me", on_shared_with_me))
     if on_my_shares:
         hub_buttons.append(_hub_btn("📋  My Shares", on_my_shares))
     if on_share:

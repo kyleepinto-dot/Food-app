@@ -279,3 +279,62 @@ def build_my_shares_shell(
         *cards,
     ]
     return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)
+
+
+def build_shared_with_me_shell(
+    metrics: dict, shares: list, on_claim, on_back,
+    on_home_click, on_scan_click, on_pantry_click, on_me_click,
+) -> ft.Container:
+    """The receiving side of sharing: food your Circle (and the wider community,
+    for sealed/produce) has offered that YOU can claim.
+
+    What shows up here is decided by the food-safety audience rule — a homemade
+    dish only appears for people in the sharer's Circle. The screen never makes
+    that decision itself; main.py fills `shares` from queries.get_visible_shares,
+    which trusts db.can_see_share. UI only; on_claim(share_id) does the work.
+    """
+    cards = []
+    for s in shares:
+        safety = str(s.get("safety_class") or "homemade_or_opened")
+        who = str(s.get("shared_by_name") or "A Circle member")
+        sid = s.get("id")
+        cards.append(ft.Container(
+            bgcolor="#FFFFFF", border=ft.Border.all(1, "#E1E7E2"), border_radius=16, padding=14,
+            content=ft.Column(spacing=6, controls=[
+                ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.START, controls=[
+                    ft.Text(str(s.get("title") or "Shared item"), size=15, weight=ft.FontWeight.BOLD,
+                            color=T.TEXT_PRIMARY, expand=True),
+                    ft.Container(bgcolor=T.GREEN_SURFACE_SOFT, border_radius=999,
+                                 padding=ft.Padding(left=10, top=4, right=10, bottom=4),
+                                 content=ft.Text(TYPE_LABEL.get(safety, safety), size=11,
+                                                 weight=ft.FontWeight.BOLD, color=T.GREEN_TEXT)),
+                ]),
+                ft.Text(f"👤 From {who}", size=13, color=T.TEXT_SECONDARY),
+                ft.Text(f"👀 Shared with: {audience_text(safety)}", size=13, color=T.TEXT_SECONDARY),
+                ft.Text(f"🕒 Pickup: {s.get('pickup_window') or 'flexible'}", size=13, color=T.TEXT_SECONDARY),
+                ft.Text(f"📅 Best by {dates.iso_to_mdy(s.get('best_by')) or 'n/a'}"
+                        if s.get("best_by") else "", size=12, color=T.TEXT_INACTIVE),
+                ft.Button(
+                    content=ft.Text("Request this", weight=ft.FontWeight.BOLD),
+                    on_click=lambda _, i=sid: on_claim(i),
+                    style=ft.ButtonStyle(bgcolor=T.BRAND_PRIMARY, color="#FFFFFF",
+                                         shape=ft.RoundedRectangleBorder(radius=12))),
+            ]),
+        ))
+    if not cards:
+        cards = [ft.Container(
+            bgcolor="#FFFFFF", border_radius=16, padding=22, alignment=ft.Alignment(0, 0),
+            content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6, controls=[
+                ft.Text("🎁", size=34),
+                ft.Text("Nothing shared with you yet", weight=ft.FontWeight.BOLD, color=T.TEXT_PRIMARY),
+                ft.Text("When someone in your Circle shares food, it'll show up here to claim.",
+                        size=13, color=T.TEXT_SECONDARY, text_align=ft.TextAlign.CENTER),
+            ]),
+        )]
+    controls = [
+        app_header(metrics, "Shared with me", on_back),
+        ft.Text("Food your Circle has offered that you can claim. Homemade food only "
+                "appears for people in the sharer's Circle.", size=13, color=T.TEXT_SECONDARY),
+        *cards,
+    ]
+    return app_shell(metrics, controls, "me", on_home_click, on_scan_click, on_pantry_click, on_me_click)

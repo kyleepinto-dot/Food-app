@@ -390,3 +390,78 @@ def get_my_shares(user_id):
     ).fetchall()
     con.close()
     return rows
+
+
+def get_visible_shares(viewer_id):
+    """Shares this viewer is allowed to SEE and could claim (the 'Shared with my
+    Circle' feed — the receiving side of sharing).
+
+    Returns every still-available share posted by SOMEONE ELSE that passes the
+    food-safety audience rule, newest first. We don't re-implement that rule here:
+    db.can_see_share() is the single source of truth (homemade/opened → only the
+    sharer's Circle; sealed/produce → anyone). Each row also carries the sharer's
+    name so the screen can say who it's from.
+    """
+    con = _connect()
+    rows = con.execute(
+        """
+        SELECT s.*, u.name AS shared_by_name
+        FROM shares s
+        JOIN users u ON u.id = s.shared_by
+        WHERE s.status = 'available' AND s.shared_by != ?
+        ORDER BY s.created_on DESC, s.id DESC
+        """,
+        (viewer_id,),
+    ).fetchall()
+    con.close()
+    # Filter through the authoritative food-safety gate in db.py.
+    return [dict(r) for r in rows if db.can_see_share(viewer_id, r["id"])]
+
+
+def get_share_detail(viewer_id, share_id):
+    """One share (with the sharer's name), or None if it doesn't exist or this
+    viewer isn't allowed to see it. Used by the claim/detail view."""
+    if not db.can_see_share(viewer_id, share_id):
+        # Viewer may still be the owner — can_see_share allows that too, so a
+        # False here means genuinely not visible.
+        return None
+    con = _connect()
+    row = con.execute(
+        "SELECT s.*, u.name AS shared_by_name FROM shares s "
+        "JOIN users u ON u.id = s.shared_by WHERE s.id = ?",
+        (share_id,),
+    ).fetchone()
+    con.close()
+    return dict(row) if row else None
+
+
+def claim_share(share_id, claimed_by):
+    """Request/claim a shared item. Records a row in the requests table and flips
+    the share from 'available' to 'requested' so the owner sees it was asked for
+    and no one else can claim it.
+
+    Returns (ok, message). Refuses (ok=False) if the share is gone, already taken,
+    or belongs to the claimer — the available→requested check is the guard that
+    stops two people claiming the same thing.
+    """
+    con = _connect()
+    row = con.execute(
+        "SELECT shared_by, status, title FROM shares WHERE id = ?", (share_id,)
+    ).fetchone()
+    if row is None:
+        con.close()
+        return (False, "That share no longer exists.")
+    if row["shared_by"] == claimed_by:
+        con.close()
+        return (False, "That's your own share.")
+    if row["status"] != "available":
+        con.close()
+        return (False, "Someone already claimed that one.")
+    con.execute(
+        "INSERT INTO requests (share_id, requested_by, status) VALUES (?, ?, 'pending')",
+        (share_id, claimed_by),
+    )
+    con.execute("UPDATE shares SET status = 'requested' WHERE id = ?", (share_id,))
+    con.commit()
+    con.close()
+    return (True, f'You requested "{row["title"]}". The owner will arrange pickup with you.')

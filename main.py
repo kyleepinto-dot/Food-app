@@ -39,7 +39,7 @@ from pages.pantry_page import set_current_user
 from pages.welcome_page import build_welcome_shell
 from pages.impact_page import build_impact_shell
 from pages.circle_page import build_circle_shell, build_member_detail_shell
-from pages.share_page import build_share_shell, build_my_shares_shell
+from pages.share_page import build_share_shell, build_my_shares_shell, build_shared_with_me_shell
 from pages.donate_page import build_donate_shell, build_dashboard_shell
 from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url, build_meal_fallback_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
@@ -499,7 +499,7 @@ def main(page: ft.Page):
             return
 
         # Yaashvi's integrated screens (each reads its data from view_state).
-        if view_state["current"] in ("circle", "share", "donate", "dashboard", "impact", "member_detail", "my_shares"):
+        if view_state["current"] in ("circle", "share", "donate", "dashboard", "impact", "member_detail", "my_shares", "shared_with_me"):
             scanner_controller.stop_camera()
             page.clean()
             page.add({
@@ -510,6 +510,7 @@ def main(page: ft.Page):
                 "impact": build_impact_view,
                 "member_detail": build_member_detail_view,
                 "my_shares": build_my_shares_view,
+                "shared_with_me": build_shared_with_me_view,
             }[view_state["current"]]())
             page.update()
             return
@@ -1123,6 +1124,10 @@ def main(page: ft.Page):
         view_state["current"] = "my_shares"
         render_current_view()
 
+    def show_shared_with_me(_=None) -> None:
+        view_state["current"] = "shared_with_me"
+        render_current_view()
+
     # ─── View builders for the integrated screens ─────────────────────────
     def build_welcome_view() -> ft.Container:
         metrics = get_layout_metrics()
@@ -1157,12 +1162,28 @@ def main(page: ft.Page):
             on_pantry_click=show_pantry, on_me_click=show_me,
             on_logout=do_logout, on_circle=show_circle,
             on_share=go_share, on_donate=show_donate, on_my_shares=show_my_shares,
+            on_shared_with_me=show_shared_with_me,
         )
 
     def build_my_shares_view() -> ft.Container:
         shares = [dict(s) for s in queries.get_my_shares(view_state["user_id"])]
         return build_my_shares_shell(
             get_layout_metrics(), shares, on_back=show_me,
+            on_home_click=show_home, on_scan_click=show_scan,
+            on_pantry_click=show_pantry, on_me_click=show_me,
+        )
+
+    def build_shared_with_me_view() -> ft.Container:
+        uid = view_state["user_id"]
+        shares = queries.get_visible_shares(uid)   # already dicts, safety-gated
+
+        def on_claim(share_id) -> None:
+            ok, msg = queries.claim_share(share_id, uid)
+            show_message(msg)
+            render_current_view()   # refresh so a claimed item drops off the feed
+
+        return build_shared_with_me_shell(
+            get_layout_metrics(), shares, on_claim=on_claim, on_back=show_me,
             on_home_click=show_home, on_scan_click=show_scan,
             on_pantry_click=show_pantry, on_me_click=show_me,
         )
