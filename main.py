@@ -463,7 +463,7 @@ def main(page: ft.Page):
             button_text_size = 24
             camera_height = max(420, shell_height - 250)
         else:
-            shell_width = min(390, viewport_w - 24)
+            shell_width = max(280, viewport_w - 24)
             shell_height = min(760, max(660, viewport_h - 24))
             title_size = 37
             subtitle_size = 14
@@ -635,6 +635,11 @@ def main(page: ft.Page):
 
     def save_edited_pantry_item(item: dict) -> None:
         item_id = view_state.get("edit_item_id")
+        if not isinstance(item_id, int):
+            show_message("Could not update item because no pantry item is selected.")
+            show_pantry()
+            return
+
         update_pantry_item(item_id, item)
         view_state["pantry_products"] = get_pantry_items()
         invalidate_meal_plan()
@@ -823,7 +828,7 @@ def main(page: ft.Page):
 
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view")
-            scanner_controller.stop_camera()
+            await scanner_controller.stop_camera_and_release()
             view_state["product"] = product
             remember_recent_product(product)
             record_successful_scan()
@@ -856,7 +861,7 @@ def main(page: ft.Page):
 
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")
-            scanner_controller.stop_camera()
+            await scanner_controller.stop_camera_and_release()
             view_state["product"] = product
             remember_recent_product(product)
             record_successful_scan()
@@ -912,8 +917,9 @@ def main(page: ft.Page):
             # Async camera APIs are dispatched via page.run_task() so UI
             # remains responsive while camera operations are in-flight.
             on_start_camera=lambda e: page.run_task(scanner_controller.start_camera, e),
-            on_stop_camera=lambda _: (scanner_controller.stop_camera(), page.update()),
+            on_stop_camera=lambda e: page.run_task(scanner_controller.stop_camera_and_release, e),
             on_take_photo=lambda e: page.run_task(scanner_controller.capture_photo_and_scan, e),
+            on_toggle_light=lambda e: page.run_task(scanner_controller.toggle_camera_light, e),
             on_manual_search=lambda e: page.run_task(scanner_controller.search_manual_barcode, e),
         )
 
@@ -1380,7 +1386,18 @@ def main(page: ft.Page):
         )
 
     # Re-render on resize so responsive metrics are applied immediately.
-    page.on_resize = lambda _: render_current_view()
+    def handle_page_resize(_):
+        # Rebuilding the scan view detaches its Flet camera control. Keep the
+        # mounted camera alive and resize its controls in place.
+        if view_state.get("current") == "scan" and (
+            scanner_controller.camera_starting or scanner_controller.running
+        ):
+            scanner_controller.resize_view(get_layout_metrics())
+            page.update()
+            return
+        render_current_view()
+
+    page.on_resize = handle_page_resize
     # Stop camera when the app closes to release camera resources cleanly.
     page.on_close = lambda _: scanner_controller.stop_camera()
 

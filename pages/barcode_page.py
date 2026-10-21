@@ -13,6 +13,37 @@ from pyzbar.pyzbar import decode
 from pages.theme import ThemeColors
 
 
+SCAN_WINDOW_LEFT_RATIO = 0.11
+SCAN_WINDOW_TOP_RATIO = 0.34
+SCAN_WINDOW_WIDTH_RATIO = 0.78
+SCAN_WINDOW_HEIGHT_RATIO = 0.38
+CAMERA_PREVIEW_ASPECT_RATIO = 4 / 3
+SCANNER_VERTICAL_UI_RESERVE = 300
+IMAGE_PROCESSING_DEBUG = True
+IMAGE_PROCESSING_DEBUG_ROOT = Path("scanner_debug_images")
+BARCODE_RECTIFY_HORIZONTAL_MARGIN_RATIO = 0.08
+BARCODE_RECTIFY_VERTICAL_MARGIN_RATIO = 0.25
+BARCODE_RECTIFIED_RETRY_SCALE = 1.5
+PYZBAR_CANDIDATE_NAMES = (
+    "grayscale",
+    "brightness",
+    "clahe",
+    "sharpened",
+    "thin_bars",
+    "balanced_otsu",
+    "thick_bars",
+)
+
+
+def get_camera_preview_dimensions(metrics: dict) -> tuple[int, int]:
+    width_limit = int(metrics["shell_width"] * (0.9 if metrics["is_desktop"] else 0.92))
+    height_limit = max(220, int(metrics["shell_height"]) - SCANNER_VERTICAL_UI_RESERVE)
+    width_limited_height = round(width_limit / CAMERA_PREVIEW_ASPECT_RATIO)
+    if width_limited_height <= height_limit:
+        return width_limit, width_limited_height
+    return round(height_limit * CAMERA_PREVIEW_ASPECT_RATIO), height_limit
+
+
 def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compact: bool = False) -> ft.Column:
     """Return a bottom navigation item with active/inactive visual state."""
 
@@ -37,11 +68,16 @@ class BarcodeScannerController:
         self.permission_handler = fph.PermissionHandler()
         self.camera = None
         self.running = False
+        self.camera_starting = False
+        self.camera_generation = 0
         self.streaming_supported = False
         self.status_text = None
         self.result_text = None
         self.camera_action_button = None
         self.capture_button = None
+        self.camera_light_button = None
+        self.camera_panel = None
+        self.scan_container = None
         self.manual_entry_field = None
         self.debug_log_field = None
         self.lookup_overlay = None
@@ -49,25 +85,60 @@ class BarcodeScannerController:
         self.on_product_name_detected: Callable[[str], Awaitable[bool]] | None = None
         self.last_failed_barcode: str | None = None
         self.lookup_in_progress = False
+        self.capture_in_progress = False
+        self.camera_light_on = False
+        self.last_barcode_width_ratio: float | None = None
+        self.last_barcode_sharpness: float | None = None
         self.debug_log_lines: list[str] = []
         self.debug_log_path = Path("runtime_debug.log")
 
     def bind_controls(self, controls: dict):
         # Called after scan UI is built so async handlers can update the
         # visible status/result text and interact with camera/capture controls.
+        self.camera_generation += 1
         self.camera = controls["camera"]
         self.status_text = controls["status_text"]
         self.result_text = controls["result_text"]
         self.camera_action_button = controls.get("camera_action_button")
         self.capture_button = controls["capture_button"]
+        self.camera_light_button = controls.get("camera_light_button")
+        self.camera_panel = controls.get("camera_panel")
+        self.scan_container = controls.get("container")
         self.manual_entry_field = controls.get("manual_entry_field")
         self.debug_log_field = controls.get("debug_log_field")
         self.lookup_overlay = controls.get("lookup_overlay")
         self.running = False
+        self.camera_starting = False
         self.streaming_supported = False
         self.last_failed_barcode = None
         self.lookup_in_progress = False
+        self.capture_in_progress = False
+        self.camera_light_on = False
         self.append_debug("bind_controls", "Scan controls bound successfully")
+
+    def resize_view(self, metrics: dict) -> None:
+        """Resize mounted scan controls without replacing the active camera."""
+
+        preview_width, preview_height = get_camera_preview_dimensions(metrics)
+        if self.camera is not None:
+            self.camera.width = preview_width
+            self.camera.height = preview_height
+        if self.camera_panel is not None:
+            self.camera_panel.width = preview_width
+            self.camera_panel.height = preview_height
+        if self.scan_container is not None:
+            self.scan_container.width = metrics["shell_width"]
+            self.scan_container.height = metrics["shell_height"]
+
+    def _control_is_mounted(self, control) -> bool:
+        """Check attachment without letting Flet's detached-control property raise."""
+
+        if control is None:
+            return False
+        try:
+            return control.page is self.page
+        except (AttributeError, RuntimeError):
+            return False
 
     def set_camera_action_state(self, camera_active: bool) -> None:
         # One stable action control changes label and behavior with the camera
@@ -170,8 +241,9 @@ class BarcodeScannerController:
             self.page.update()
         finally:
             self.lookup_in_progress = False
-            if self.lookup_overlay is not None and getattr(self.lookup_overlay, "page", None) is not None:
-                self.lookup_overlay.visible = False
+            lookup_overlay = self.lookup_overlay
+            if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
+                lookup_overlay.visible = False
                 self.page.update()
             self.append_debug("open_food_facts_lookup", "Lookup request finished")
 
@@ -249,8 +321,9 @@ class BarcodeScannerController:
             self.page.update()
         finally:
             self.lookup_in_progress = False
-            if self.lookup_overlay is not None and getattr(self.lookup_overlay, "page", None) is not None:
-                self.lookup_overlay.visible = False
+            lookup_overlay = self.lookup_overlay
+            if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
+                lookup_overlay.visible = False
                 self.page.update()
 
     def camera_supported_on_platform(self) -> bool:
@@ -275,40 +348,415 @@ class BarcodeScannerController:
             np.copyto(sharpened, image, where=low_contrast_mask)
         return sharpened
 
-    async def preprocess_for_pyzbar(self, img):
-        # Convert to grayscale to reduce dimensionality and stabilize decode.
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    def image_processing_debug_enabled(self) -> bool:
+        platform_name = str(self.page.platform).lower()
+        return IMAGE_PROCESSING_DEBUG and "android" not in platform_name
 
-        # Bilateral filter smooths noise while preserving barcode edges.
-        gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+    def create_photo_debug_folder(self) -> Path | None:
+        if not self.image_processing_debug_enabled():
+            return None
 
-        # Edge enhancement improves weak or slightly blurred captures.
-        gray = self.unsharp_mask(gray)
+        folder_name = datetime.now().strftime("photo_%Y-%m-%d_%H-%M-%S_%f")
+        debug_folder = IMAGE_PROCESSING_DEBUG_ROOT / folder_name
+        try:
+            debug_folder.mkdir(parents=True, exist_ok=False)
+        except OSError as exc:
+            self.append_debug("image_debug_error", f"Could not create {debug_folder}: {exc}")
+            return None
+        return debug_folder
 
-        # Adaptive thresholding handles mixed lighting conditions by computing
-        # local thresholds instead of using one global threshold.
-        gray = cv2.adaptiveThreshold(
-            gray,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            15,
-            3,
+    def write_debug_image(self, debug_folder: Path | None, filename: str, image) -> None:
+        if debug_folder is None:
+            return
+
+        output_path = debug_folder / filename
+        try:
+            saved = cv2.imwrite(str(output_path), image)
+        except cv2.error as exc:
+            self.append_debug("image_debug_error", f"Could not write {output_path}: {exc}")
+            return
+        if not saved:
+            self.append_debug("image_debug_error", f"OpenCV did not write {output_path}")
+
+    @staticmethod
+    def decoded_barcode_value(barcode) -> str:
+        return barcode if isinstance(barcode, str) else barcode.data.decode("utf-8", "ignore")
+
+    def write_decoded_barcode_image(
+        self,
+        debug_folder: Path | None,
+        barcode,
+        image,
+        decoder_name: str,
+    ) -> None:
+        barcode_value = self.decoded_barcode_value(barcode)
+        safe_barcode = re.sub(r"[^A-Za-z0-9._-]+", "_", barcode_value).strip("._-")
+        safe_barcode = safe_barcode[:100] or "unknown"
+        self.write_debug_image(
+            debug_folder,
+            f"decoded_barcode_{safe_barcode}_{decoder_name}_input.png",
+            image,
         )
+
+    async def preprocess_for_pyzbar(
+        self,
+        img,
+        debug_folder: Path | None = None,
+        debug_prefix: str = "",
+        stage_start: int = 2,
+    ):
+        # Convert to grayscale to reduce dimensionality and stabilize decode.
+        grayscale = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.write_debug_image(debug_folder, f"{stage_start:02d}_{debug_prefix}grayscale.png", grayscale)
+
+        # Brighten dark captures without washing out already well-lit frames.
+        brightness_corrected = grayscale
+        mean_luminance = float(np.mean(brightness_corrected))
+        if mean_luminance < 120:
+            gamma = max(0.55, 0.9 - ((120 - mean_luminance) / 300))
+            lookup_table = np.array(
+                [((value / 255.0) ** gamma) * 255 for value in range(256)],
+                dtype=np.uint8,
+            )
+            brightness_corrected = cv2.LUT(brightness_corrected, lookup_table)
+        self.write_debug_image(
+            debug_folder,
+            f"{stage_start + 1:02d}_{debug_prefix}brightness_corrected.png",
+            brightness_corrected,
+        )
+
+        # Local contrast enhancement makes bars readable under uneven light.
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        contrast_enhanced = clahe.apply(brightness_corrected)
+        self.write_debug_image(
+            debug_folder,
+            f"{stage_start + 2:02d}_{debug_prefix}local_contrast_clahe.png",
+            contrast_enhanced,
+        )
+
+        # Apply only light sharpening; strong denoising merged narrow bars in
+        # real captures and made otherwise useful candidates less readable.
+        sharpened = self.unsharp_mask(
+            contrast_enhanced,
+            kernel_size=(3, 3),
+            sigma=0.8,
+            amount=0.65,
+        )
+        self.write_debug_image(
+            debug_folder,
+            f"{stage_start + 3:02d}_{debug_prefix}lightly_sharpened.png",
+            sharpened,
+        )
+
+        # Normalize curved-label lighting before thresholding so shadows do
+        # not erase faint bars or make bright bars merge into the background.
+        background = cv2.GaussianBlur(brightness_corrected, (0, 0), 15)
+        illumination_normalized = cv2.divide(brightness_corrected, background, scale=255)
+        self.write_debug_image(
+            debug_folder,
+            f"{stage_start + 4:02d}_{debug_prefix}illumination_normalized.png",
+            illumination_normalized,
+        )
+
+        otsu_value, _ = cv2.threshold(
+            illumination_normalized,
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )
+        threshold_levels = (
+            max(0, round(otsu_value) - 15),
+            round(otsu_value),
+            min(255, round(otsu_value) + 15),
+        )
+        thresholded_candidates = tuple(
+            cv2.threshold(
+                illumination_normalized,
+                threshold_level,
+                255,
+                cv2.THRESH_BINARY,
+            )[1]
+            for threshold_level in threshold_levels
+        )
+        threshold_names = (
+            "low_threshold_thin_bars",
+            "balanced_otsu_threshold",
+            "high_threshold_thick_bars",
+        )
+        for index, (threshold_name, thresholded) in enumerate(
+            zip(threshold_names, thresholded_candidates)
+        ):
+            self.write_debug_image(
+                debug_folder,
+                f"{stage_start + 5 + index:02d}_{debug_prefix}{threshold_name}.png",
+                thresholded,
+            )
 
         # Add white border so codes near image edges still have clean margins
         # for pyzbar's detector window.
         padding = 20
-        gray = cv2.copyMakeBorder(
-            gray,
-            padding,
-            padding,
-            padding,
-            padding,
-            cv2.BORDER_CONSTANT,
-            value=255,
+        candidates = (
+            grayscale,
+            brightness_corrected,
+            contrast_enhanced,
+            sharpened,
+            *thresholded_candidates,
         )
-        return gray
+        padded_candidates = tuple(
+            cv2.copyMakeBorder(
+                candidate,
+                padding,
+                padding,
+                padding,
+                padding,
+                cv2.BORDER_CONSTANT,
+                value=255,
+            )
+            for candidate in candidates
+        )
+        for index, (candidate_name, candidate) in enumerate(
+            zip(PYZBAR_CANDIDATE_NAMES, padded_candidates)
+        ):
+            self.write_debug_image(
+                debug_folder,
+                f"{stage_start + 8 + index:02d}_{debug_prefix}{candidate_name}_with_border.png",
+                candidate,
+            )
+        return padded_candidates
+
+    def decode_with_pyzbar(
+        self,
+        candidates,
+        debug_folder: Path | None,
+        debug_prefix: str = "",
+    ):
+        for index, (candidate_name, candidate) in enumerate(
+            zip(PYZBAR_CANDIDATE_NAMES, candidates),
+            start=1,
+        ):
+            self.write_debug_image(
+                debug_folder,
+                f"pyzbar_{debug_prefix}input_{index:02d}_{candidate_name}.png",
+                candidate,
+            )
+            barcodes = decode(candidate)
+            if barcodes:
+                self.write_decoded_barcode_image(
+                    debug_folder,
+                    barcodes[0],
+                    candidate,
+                    f"pyzbar_{debug_prefix.rstrip('_')}" if debug_prefix else "pyzbar",
+                )
+                return barcodes
+        return []
+
+    def decode_candidates_with_opencv(
+        self,
+        candidates,
+        debug_folder: Path | None,
+        debug_prefix: str = "",
+    ) -> list[str]:
+        detector_factory = getattr(cv2, "barcode_BarcodeDetector", None)
+        if detector_factory is None:
+            self.append_debug("opencv_candidate_error", "OpenCV barcode detector is unavailable")
+            return []
+
+        detector = detector_factory()
+        for candidate_name, candidate in zip(PYZBAR_CANDIDATE_NAMES, candidates):
+            try:
+                _, decoded_info, _, _ = detector.detectAndDecodeWithType(candidate)
+            except cv2.error as exc:
+                self.append_debug(
+                    "opencv_candidate_error",
+                    f"{candidate_name} decode failed: {exc}",
+                )
+                continue
+
+            decoded_values = [value for value in decoded_info if value]
+            if decoded_values:
+                decoder_name = f"opencv_{debug_prefix}{candidate_name}"
+                self.write_decoded_barcode_image(
+                    debug_folder,
+                    decoded_values[0],
+                    candidate,
+                    decoder_name,
+                )
+                return decoded_values
+        return []
+
+    def detect_and_rectify_barcode(self, scan_region):
+        detector_factory = getattr(cv2, "barcode_BarcodeDetector", None)
+        if detector_factory is None:
+            self.append_debug("barcode_region_error", "OpenCV barcode detector is unavailable")
+            return [], None
+        detector = detector_factory()
+        try:
+            _, decoded_info, _, points = detector.detectAndDecodeWithType(scan_region)
+        except cv2.error as exc:
+            self.append_debug("barcode_region_error", f"OpenCV barcode detection failed: {exc}")
+            return [], None
+
+        decoded_values = [value for value in decoded_info if value]
+        if points is None or len(points) == 0:
+            return decoded_values, None
+
+        quadrilateral = np.asarray(points[0], dtype=np.float32)
+        point_sums = quadrilateral.sum(axis=1)
+        point_differences = np.diff(quadrilateral, axis=1).reshape(-1)
+        ordered = np.array(
+            [
+                quadrilateral[np.argmin(point_sums)],
+                quadrilateral[np.argmin(point_differences)],
+                quadrilateral[np.argmax(point_sums)],
+                quadrilateral[np.argmax(point_differences)],
+            ],
+            dtype=np.float32,
+        )
+        top_left, top_right, bottom_right, bottom_left = ordered
+        width = max(
+            np.linalg.norm(bottom_right - bottom_left),
+            np.linalg.norm(top_right - top_left),
+        )
+        height = max(
+            np.linalg.norm(top_right - bottom_right),
+            np.linalg.norm(top_left - bottom_left),
+        )
+        horizontal_axis = ((top_right - top_left) + (bottom_right - bottom_left)) / 2
+        vertical_axis = ((bottom_left - top_left) + (bottom_right - top_right)) / 2
+        horizontal_axis /= max(float(np.linalg.norm(horizontal_axis)), 1.0)
+        vertical_axis /= max(float(np.linalg.norm(vertical_axis)), 1.0)
+        horizontal_margin = width * BARCODE_RECTIFY_HORIZONTAL_MARGIN_RATIO
+        vertical_margin = height * BARCODE_RECTIFY_VERTICAL_MARGIN_RATIO
+        ordered = np.array(
+            [
+                top_left - horizontal_axis * horizontal_margin - vertical_axis * vertical_margin,
+                top_right + horizontal_axis * horizontal_margin - vertical_axis * vertical_margin,
+                bottom_right + horizontal_axis * horizontal_margin + vertical_axis * vertical_margin,
+                bottom_left - horizontal_axis * horizontal_margin + vertical_axis * vertical_margin,
+            ],
+            dtype=np.float32,
+        )
+        ordered[:, 0] = np.clip(ordered[:, 0], 0, scan_region.shape[1] - 1)
+        ordered[:, 1] = np.clip(ordered[:, 1], 0, scan_region.shape[0] - 1)
+        output_width = max(1, round(float(width + (2 * horizontal_margin))))
+        output_height = max(1, round(float(height + (2 * vertical_margin))))
+        destination = np.array(
+            [
+                [0, 0],
+                [output_width - 1, 0],
+                [output_width - 1, output_height - 1],
+                [0, output_height - 1],
+            ],
+            dtype=np.float32,
+        )
+        transform = cv2.getPerspectiveTransform(ordered, destination)
+        rectified = cv2.warpPerspective(
+            scan_region,
+            transform,
+            (output_width, output_height),
+            borderValue=(255, 255, 255),
+        )
+        if rectified.shape[0] > rectified.shape[1]:
+            rectified = cv2.rotate(rectified, cv2.ROTATE_90_CLOCKWISE)
+        self.last_barcode_width_ratio = rectified.shape[1] / scan_region.shape[1]
+        rectified_gray = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY)
+        self.last_barcode_sharpness = float(cv2.Laplacian(rectified_gray, cv2.CV_64F).var())
+        return decoded_values, rectified
+
+    def capture_quality_guidance(self) -> str:
+        if self.last_barcode_width_ratio is None:
+            return "Move the barcode closer and keep it fully inside the scanning box."
+        if self.last_barcode_width_ratio < 0.30:
+            return "Move closer so the barcode fills more of the scanning box."
+        if self.last_barcode_sharpness is not None and self.last_barcode_sharpness < 60:
+            return "Hold the package steady and wait for the camera to focus."
+        return "Flatten the barcode, reduce the angle, and try again."
+
+    @staticmethod
+    def crop_to_scan_window(frame):
+        """Return only the pixels shown through the clear scanner guide."""
+
+        frame_height, frame_width = frame.shape[:2]
+        left = round(frame_width * SCAN_WINDOW_LEFT_RATIO)
+        top = round(frame_height * SCAN_WINDOW_TOP_RATIO)
+        right = round(frame_width * (SCAN_WINDOW_LEFT_RATIO + SCAN_WINDOW_WIDTH_RATIO))
+        bottom = round(frame_height * (SCAN_WINDOW_TOP_RATIO + SCAN_WINDOW_HEIGHT_RATIO))
+        return frame[top:bottom, left:right]
+
+    async def decode_scan_window(self, frame, debug_folder: Path | None = None):
+        self.last_barcode_width_ratio = None
+        self.last_barcode_sharpness = None
+        scan_region = self.crop_to_scan_window(frame)
+        if scan_region.size == 0:
+            self.append_debug("scan_region", "Clear scanner region did not contain any pixels")
+            return []
+
+        self.write_debug_image(debug_folder, "01_scanning_box_crop.png", scan_region)
+        candidates = await self.preprocess_for_pyzbar(scan_region, debug_folder)
+        barcodes = self.decode_with_pyzbar(candidates, debug_folder)
+        if barcodes:
+            return barcodes
+
+        decoded_values = self.decode_candidates_with_opencv(candidates, debug_folder)
+        if decoded_values:
+            return decoded_values
+
+        decoded_values, rectified = self.detect_and_rectify_barcode(scan_region)
+        if decoded_values:
+            self.write_decoded_barcode_image(
+                debug_folder,
+                decoded_values[0],
+                scan_region,
+                "opencv",
+            )
+            return decoded_values
+        if rectified is not None:
+            self.write_debug_image(debug_folder, "17_detected_barcode_rectified.png", rectified)
+            rectified_candidates = await self.preprocess_for_pyzbar(
+                rectified,
+                debug_folder,
+                debug_prefix="rectified_",
+                stage_start=18,
+            )
+            barcodes = self.decode_with_pyzbar(
+                rectified_candidates,
+                debug_folder,
+                debug_prefix="rectified_",
+            )
+            if barcodes:
+                return barcodes
+            upscaled_rectified_candidates = tuple(
+                cv2.resize(
+                    candidate,
+                    None,
+                    fx=BARCODE_RECTIFIED_RETRY_SCALE,
+                    fy=BARCODE_RECTIFIED_RETRY_SCALE,
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                for candidate in rectified_candidates
+            )
+            barcodes = self.decode_with_pyzbar(
+                upscaled_rectified_candidates,
+                debug_folder,
+                debug_prefix="rectified_upscaled_",
+            )
+            if barcodes:
+                return barcodes
+            decoded_values = self.decode_candidates_with_opencv(
+                rectified_candidates,
+                debug_folder,
+                debug_prefix="rectified_",
+            )
+            if decoded_values:
+                return decoded_values
+            decoded_values = self.decode_candidates_with_opencv(
+                upscaled_rectified_candidates,
+                debug_folder,
+                debug_prefix="rectified_upscaled_",
+            )
+            if decoded_values:
+                return decoded_values
+        return []
 
     async def process_stream_frame(self, e):
         # Called for each streaming frame when live image stream is active.
@@ -328,17 +776,14 @@ class BarcodeScannerController:
         if frame is None:
             return
 
-        # Mirror frame to match what users see in most front-facing previews.
-        frame = cv2.flip(frame, 1)
-        gray = await self.preprocess_for_pyzbar(frame)
-        barcodes = decode(gray)
+        barcodes = await self.decode_scan_window(frame)
 
         if self.result_text is None:
             return
 
         if barcodes:
             barcode = barcodes[0]
-            barcode_value = barcode.data.decode("utf-8", "ignore")
+            barcode_value = self.decoded_barcode_value(barcode)
             self.append_debug("stream_decode", f"Barcode decoded from stream: {barcode_value}")
             await self.handle_decoded_barcode(barcode_value)
         else:
@@ -347,7 +792,8 @@ class BarcodeScannerController:
         self.page.update()
 
     async def capture_photo_and_scan(self, e):
-        # Photo mode is used when live stream decoding is unavailable.
+        # The photo handler is shared by the capture button and camera-preview
+        # clicks, so both interactions use the same guarded decoding path.
         if not self.running:
             self.append_debug("photo_scan", "Capture requested while camera not running")
             if self.status_text is not None:
@@ -357,6 +803,16 @@ class BarcodeScannerController:
             self.page.update()
             return
 
+        if self.lookup_in_progress:
+            self.append_debug("photo_scan", "Capture ignored while product lookup is in progress")
+            return
+
+        if self.capture_in_progress:
+            self.append_debug("photo_scan", "Capture ignored while another photo is processing")
+            return
+
+        generation = self.camera_generation
+        self.capture_in_progress = True
         if self.status_text is not None:
             self.status_text.value = "Capturing photo..."
         if self.result_text is not None:
@@ -378,18 +834,22 @@ class BarcodeScannerController:
             if frame is None:
                 raise RuntimeError("Could not read the captured image")
 
-            frame = cv2.flip(frame, 1)
-            gray = await self.preprocess_for_pyzbar(frame)
-            barcodes = decode(gray)
+            debug_folder = self.create_photo_debug_folder()
+            self.write_debug_image(debug_folder, "00_original_camera_frame.png", frame)
+            barcodes = await self.decode_scan_window(frame, debug_folder)
+            if debug_folder is not None:
+                self.append_debug("image_debug", f"Saved photo processing stages to {debug_folder}")
 
             if barcodes:
                 barcode = barcodes[0]
-                barcode_value = barcode.data.decode("utf-8", "ignore")
+                barcode_value = self.decoded_barcode_value(barcode)
                 self.append_debug("photo_scan", f"Barcode decoded from photo: {barcode_value}")
                 await self.handle_decoded_barcode(barcode_value)
+                if generation != self.camera_generation:
+                    return
             elif self.result_text is not None:
                 self.append_debug("photo_scan", "No barcode found in captured photo")
-                self.result_text.value = "No barcode found in the photo"
+                self.result_text.value = self.capture_quality_guidance()
 
             if self.status_text is not None:
                 self.status_text.value = "Photo captured"
@@ -403,12 +863,29 @@ class BarcodeScannerController:
             if self.result_text is not None:
                 self.result_text.value = "Could not read the captured photo"
             self.page.update()
+        finally:
+            if generation == self.camera_generation:
+                self.capture_in_progress = False
 
     async def start_camera(self, e):
         # Guard against duplicate starts from repeated button presses.
-        if self.running:
-            self.append_debug("start_camera", "Start ignored because camera is already running")
+        if self.running or self.camera_starting:
+            self.append_debug("start_camera", "Start ignored because camera is starting or already running")
             return
+
+        camera = self.camera
+        generation = self.camera_generation
+        if camera is None or not self._control_is_mounted(camera):
+            self.append_debug("start_camera", "Camera control is not mounted on this page")
+            self.set_camera_action_state(False)
+            if self.status_text is not None:
+                self.status_text.value = "Camera preview unavailable"
+            if self.result_text is not None:
+                self.result_text.value = "Open this app in a supported browser or on Android/iOS to use the camera."
+            self.page.update()
+            return
+
+        self.camera_starting = True
 
         if self.status_text is not None:
             self.status_text.value = "Requesting camera access..."
@@ -416,16 +893,6 @@ class BarcodeScannerController:
             self.result_text.value = "Opening the camera..."
         self.set_camera_action_state(True)
         self.page.update()
-
-        if self.camera is None:
-            self.append_debug("start_camera", "Camera control is not available on this page")
-            self.set_camera_action_state(False)
-            if self.status_text is not None:
-                self.status_text.value = "Camera preview unavailable"
-            if self.result_text is not None:
-                self.result_text.value = "Use Android, iOS, or Web to scan with the camera."
-            self.page.update()
-            return
 
         try:
             # Browser camera access is prompted by the browser. Native mobile
@@ -449,25 +916,61 @@ class BarcodeScannerController:
                         self.page.update()
                         return
 
-            # Discover cameras and initialize the first available device.
-            cameras = await self.camera.get_available_cameras()
+            if generation != self.camera_generation or not self._control_is_mounted(camera):
+                self.append_debug("start_camera", "Camera view changed before device discovery")
+                return
+
+            # Prefer the rear camera because it generally has better focus and
+            # illumination controls for close-up barcode scanning.
+            cameras = await camera.get_available_cameras()
+            if generation != self.camera_generation or not self._control_is_mounted(camera):
+                self.append_debug("start_camera", "Camera view changed during device discovery")
+                return
             if not cameras:
                 raise RuntimeError("No camera devices were found")
             self.append_debug("start_camera", f"Detected {len(cameras)} camera device(s)")
 
-            await self.camera.initialize(cameras[0], fc.ResolutionPreset.MEDIUM, enable_audio=False)
+            selected_camera = next(
+                (
+                    available_camera
+                    for available_camera in cameras
+                    if available_camera.lens_direction == fc.CameraLensDirection.BACK
+                ),
+                cameras[0],
+            )
+            await camera.initialize(selected_camera, fc.ResolutionPreset.VERY_HIGH, enable_audio=False)
+            if generation != self.camera_generation or not self._control_is_mounted(camera):
+                self.append_debug("start_camera", "Camera view changed during initialization")
+                return
 
-            supports_streaming = await self.camera.supports_image_streaming()
+            try:
+                await camera.set_exposure_mode(fc.ExposureMode.AUTO)
+                await camera.set_exposure_point(ft.Offset(0.5, 0.5))
+                await camera.set_focus_mode(fc.FocusMode.AUTO)
+                await camera.set_focus_point(ft.Offset(0.5, 0.5))
+                maximum_exposure = await camera.get_max_exposure_offset()
+                exposure_offset = max(0.0, min(float(maximum_exposure), 1.5))
+                applied_exposure = await camera.set_exposure_offset(exposure_offset)
+                self.append_debug("camera_exposure", f"Exposure offset={applied_exposure}")
+            except Exception as exc:
+                self.append_debug("camera_exposure_error", f"{type(exc).__name__}: {exc}")
+
+            supports_streaming = await camera.supports_image_streaming()
             self.streaming_supported = supports_streaming
             self.append_debug("start_camera", f"Image streaming supported={supports_streaming}")
 
             if supports_streaming:
                 # Best UX: continuous live decoding from incoming frames.
-                self.camera.on_stream_image = self.process_stream_frame
-                await self.camera.start_image_stream()
+                camera.on_stream_image = self.process_stream_frame
+                await camera.start_image_stream()
+                if generation != self.camera_generation or not self._control_is_mounted(camera):
+                    self.append_debug("start_camera", "Camera view changed while starting image stream")
+                    return
                 self.running = True
                 if self.capture_button is not None:
                     self.capture_button.disabled = True
+                if self.camera_light_button is not None:
+                    self.camera_light_button.disabled = False
                 if self.status_text is not None:
                     self.status_text.value = "Scanning..."
                 if self.result_text is not None:
@@ -477,6 +980,8 @@ class BarcodeScannerController:
                 self.running = True
                 if self.capture_button is not None:
                     self.capture_button.disabled = False
+                if self.camera_light_button is not None:
+                    self.camera_light_button.disabled = False
                 if self.status_text is not None:
                     self.status_text.value = "Camera preview ready"
                 if self.result_text is not None:
@@ -503,15 +1008,38 @@ class BarcodeScannerController:
                 else:
                     self.result_text.value = "Please allow camera access and make sure a webcam is connected."
             self.page.update()
+        finally:
+            if generation == self.camera_generation:
+                self.camera_starting = False
 
-    async def _safe_camera_call(self, camera_call, *args):
+    async def toggle_camera_light(self, _e):
+        camera = self.camera
+        if not self.running or camera is None or not self._control_is_mounted(camera):
+            if self.status_text is not None:
+                self.status_text.value = "Start the camera before using the light"
+            self.page.update()
+            return
+
+        requested_state = not self.camera_light_on
+        try:
+            await camera.set_flash_mode(fc.FlashMode.TORCH if requested_state else fc.FlashMode.OFF)
+            self.camera_light_on = requested_state
+            if self.camera_light_button is not None:
+                self.camera_light_button.content = ft.Text("Light Off" if requested_state else "Light On")
+            if self.status_text is not None:
+                self.status_text.value = "Camera light on" if requested_state else "Camera light off"
+            self.append_debug("camera_light", f"Torch enabled={requested_state}")
+        except Exception as exc:
+            self.append_debug("camera_light_error", f"{type(exc).__name__}: {exc}")
+            if self.status_text is not None:
+                self.status_text.value = "Camera light is not supported on this device"
+        self.page.update()
+
+    async def _safe_camera_call(self, camera, camera_call, *args):
         # Camera plugin APIs throw when the control is not mounted on page.
         # This guard avoids scheduling calls after the scan view has been
         # replaced (e.g., navigating to product details from manual search).
-        if self.camera is None:
-            return
-
-        if getattr(self.camera, "page", None) is None:
+        if not self._control_is_mounted(camera):
             return
 
         try:
@@ -521,38 +1049,44 @@ class BarcodeScannerController:
 
     def stop_camera(self):
         # Reset state first so UI and handlers treat camera as inactive.
+        self.camera_generation += 1
+        self.camera_starting = False
         self.running = False
+        self.capture_in_progress = False
+        self.camera_light_on = False
         self.set_camera_action_state(False)
         self.append_debug("stop_camera", "Stop requested")
 
-        if self.camera is not None:
-            try:
-                # Stop stream when active; each call is protected so one
-                # failure does not block remaining cleanup work.
-                if self.streaming_supported:
-                    self.page.run_task(self._safe_camera_call, self.camera.stop_image_stream)
-            except Exception:
-                pass
-
-            try:
-                self.page.run_task(self._safe_camera_call, self.camera.pause_preview)
-            except Exception:
-                pass
-
-            try:
-                # Remove selected camera description to release device binding.
-                self.page.run_task(self._safe_camera_call, self.camera.set_description, None)
-            except Exception:
-                pass
-
+        # Do not queue camera method calls here. Navigation removes the camera
+        # control immediately, and late method results for an unmounted control
+        # corrupt Flet's invoke-result routing.
         self.streaming_supported = False
 
         if self.capture_button is not None:
             self.capture_button.disabled = True
+        if self.camera_light_button is not None:
+            self.camera_light_button.disabled = True
+            self.camera_light_button.content = ft.Text("Light On")
         if self.status_text is not None:
             self.status_text.value = "Camera stopped"
         if self.result_text is not None:
             self.result_text.value = "No barcode scanned yet"
+
+    async def stop_camera_and_release(self, _e=None):
+        """Stop mounted camera hardware before its control is removed."""
+
+        camera = self.camera
+        light_was_on = self.camera_light_on
+        streaming_was_supported = self.streaming_supported
+        self.stop_camera()
+
+        if camera is not None:
+            if light_was_on:
+                await self._safe_camera_call(camera, camera.set_flash_mode, fc.FlashMode.OFF)
+            if streaming_was_supported:
+                await self._safe_camera_call(camera, camera.stop_image_stream)
+            await self._safe_camera_call(camera, camera.pause_preview)
+            await self._safe_camera_call(camera, camera.set_description, None)
 
 
 def build_scan_shell(
@@ -568,6 +1102,7 @@ def build_scan_shell(
     on_start_camera,
     on_stop_camera,
     on_take_photo,
+    on_toggle_light,
     on_manual_search,
 ) -> dict:
     # Build the complete scanner shell and return both the root container and
@@ -590,9 +1125,10 @@ def build_scan_shell(
             on_start_camera(e)
 
     camera_action_button = ft.Button(
-        content=ft.Text("Start Camera"),
+        content=ft.Text("Start Camera" if camera_is_supported else "Camera unavailable here"),
         data="start",
         on_click=toggle_camera,
+        disabled=not camera_is_supported,
         style=ft.ButtonStyle(bgcolor="#2E5D4E", color=ThemeColors.BRAND_ON_PRIMARY),
     )
 
@@ -606,11 +1142,21 @@ def build_scan_shell(
                 color=ThemeColors.TEXT_PRIMARY,
             ),
         )
+        camera_light_button = ft.Button(
+            content=ft.Text("Light On"),
+            disabled=True,
+            on_click=on_toggle_light,
+            style=ft.ButtonStyle(
+                bgcolor="#FFFFFF",
+                color=ThemeColors.TEXT_PRIMARY,
+            ),
+        )
         action_controls: list[ft.Control] = cast(
             list[ft.Control],
             [
                 camera_action_button,
                 capture_button,
+                camera_light_button,
             ],
         )
         preview_content: ft.Control = camera if camera is not None else ft.Container()
@@ -618,6 +1164,7 @@ def build_scan_shell(
         # Informational fallback for runtimes where camera preview is
         # unsupported, while keeping navigation available.
         capture_button = ft.Button(content=ft.Text("Take Photo"), disabled=True)
+        camera_light_button = ft.Button(content=ft.Text("Light On"), disabled=True)
         status_text.value = "Camera preview is unavailable on this platform"
         result_text.value = "This app targets Web, Android, and iOS"
         action_controls = cast(
@@ -641,48 +1188,38 @@ def build_scan_shell(
             ),
         )
 
-    preview_frame_width = int(metrics["shell_width"] * (0.9 if metrics["is_desktop"] else 0.92))
-    scanner_surface_height = 350 if metrics["is_desktop"] else 300
-    scan_window_height = 135 if metrics["is_desktop"] else 110
-    scan_window_top = int((scanner_surface_height - scan_window_height) / 2) + 14
-    scan_window_side = 80 if metrics["is_desktop"] else 36
-    mask_color = "#78000000"
+    preview_frame_width, scanner_surface_height = get_camera_preview_dimensions(metrics)
+    if camera is not None:
+        camera.expand = False
+        camera.width = preview_frame_width
+        camera.height = scanner_surface_height
+        camera.aspect_ratio = CAMERA_PREVIEW_ASPECT_RATIO
+    mask_color = "#33000000"
 
-    # Four translucent panels leave a clear barcode-sized opening. A separate
-    # rounded border keeps the target crisp without dimming the camera inside.
-    scan_guide_overlay = ft.Stack(
+    # Light translucent panels keep the full camera visible while leaving a
+    # centered barcode-shaped opening at normal preview brightness.
+    scan_guide_overlay = ft.Column(
         expand=True,
+        spacing=0,
         visible=camera_is_supported,
         controls=[
-            ft.Container(top=0, left=0, right=0, height=scan_window_top, bgcolor=mask_color),
-            ft.Container(
-                top=scan_window_top,
-                left=0,
-                width=scan_window_side,
-                height=scan_window_height,
-                bgcolor=mask_color,
+            ft.Container(expand=round(SCAN_WINDOW_TOP_RATIO * 100), bgcolor=mask_color),
+            ft.Row(
+                expand=round(SCAN_WINDOW_HEIGHT_RATIO * 100),
+                spacing=0,
+                controls=[
+                    ft.Container(expand=round(SCAN_WINDOW_LEFT_RATIO * 100), bgcolor=mask_color),
+                    ft.Container(
+                        expand=round(SCAN_WINDOW_WIDTH_RATIO * 100),
+                        border=ft.Border.all(3, "#FFFFFF"),
+                        border_radius=18,
+                    ),
+                    ft.Container(expand=round(SCAN_WINDOW_LEFT_RATIO * 100), bgcolor=mask_color),
+                ],
             ),
             ft.Container(
-                top=scan_window_top,
-                right=0,
-                width=scan_window_side,
-                height=scan_window_height,
+                expand=round((1 - SCAN_WINDOW_TOP_RATIO - SCAN_WINDOW_HEIGHT_RATIO) * 100),
                 bgcolor=mask_color,
-            ),
-            ft.Container(
-                top=scan_window_top + scan_window_height,
-                left=0,
-                right=0,
-                bottom=0,
-                bgcolor=mask_color,
-            ),
-            ft.Container(
-                top=scan_window_top,
-                left=scan_window_side,
-                right=scan_window_side,
-                height=scan_window_height,
-                border=ft.Border.all(3, "#FFFFFF"),
-                border_radius=18,
             ),
         ],
     )
@@ -712,51 +1249,63 @@ def build_scan_shell(
         ),
     )
 
-    scanner_surface = ft.Container(
+    scanner_surface_content: ft.Control = ft.Stack(
+        controls=[
+            ft.Container(
+                expand=True,
+                alignment=ft.Alignment(0, 0),
+                content=ft.Stack(
+                    controls=[
+                        ft.Container(expand=True, content=preview_content),
+                        scan_guide_overlay,
+                    ],
+                ),
+            ),
+            ft.Container(
+                top=14,
+                left=0,
+                right=0,
+                alignment=ft.Alignment(0, 0),
+                content=ft.Container(
+                    bgcolor="#FFFFFF",
+                    border_radius=22,
+                    padding=ft.Padding(left=14, top=8, right=14, bottom=8),
+                    content=ft.Row(
+                        tight=True,
+                        spacing=8,
+                        controls=[
+                            ft.Icon(ft.Icons.CAMERA_ALT_OUTLINED, size=18, color=ThemeColors.GREEN_TEXT),
+                            ft.Text(
+                                "Click or tap the camera to take a photo",
+                                size=16 if metrics["is_desktop"] else 14,
+                                color=ThemeColors.TEXT_PRIMARY,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+            lookup_overlay,
+        ],
+    )
+    if camera_is_supported:
+        scanner_surface_content = ft.GestureDetector(
+            mouse_cursor=ft.MouseCursor.CLICK,
+            on_tap=on_take_photo,
+            content=scanner_surface_content,
+        )
+
+    camera_panel = ft.Container(
+        width=preview_frame_width,
         height=scanner_surface_height,
         border_radius=22,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         bgcolor="#FFFFFF",
-        content=ft.Stack(
-            controls=[
-                ft.Container(
-                    expand=True,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Container(
-                        width=preview_frame_width,
-                        expand=True,
-                        alignment=ft.Alignment(0, 0),
-                        content=preview_content,
-                    ),
-                ),
-                scan_guide_overlay,
-                ft.Container(
-                    top=14,
-                    left=0,
-                    right=0,
-                    alignment=ft.Alignment(0, 0),
-                    content=ft.Container(
-                        bgcolor="#FFFFFF",
-                        border_radius=22,
-                        padding=ft.Padding(left=14, top=8, right=14, bottom=8),
-                        content=ft.Row(
-                            tight=True,
-                            spacing=8,
-                            controls=[
-                                ft.Icon(ft.Icons.CAMERA_ALT_OUTLINED, size=18, color=ThemeColors.GREEN_TEXT),
-                                ft.Text(
-                                    "Point your camera at the product barcode",
-                                    size=16 if metrics["is_desktop"] else 14,
-                                    color=ThemeColors.TEXT_PRIMARY,
-                                    weight=ft.FontWeight.W_600,
-                                ),
-                            ],
-                        ),
-                    ),
-                ),
-                lookup_overlay,
-            ],
-        ),
+        content=scanner_surface_content,
+    )
+    scanner_surface = ft.Row(
+        alignment=ft.MainAxisAlignment.CENTER,
+        controls=[camera_panel],
     )
 
     manual_entry_field = ft.TextField(
@@ -1195,6 +1744,8 @@ def build_scan_shell(
         "result_text": result_text,
         "camera_action_button": camera_action_button,
         "capture_button": capture_button,
+        "camera_light_button": camera_light_button,
+        "camera_panel": camera_panel,
         "manual_entry_field": manual_entry_field,
         "lookup_overlay": lookup_overlay,
     }
