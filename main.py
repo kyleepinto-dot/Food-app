@@ -2,12 +2,17 @@ import flet as ft
 import asyncio
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
 from pages.barcode_page import BarcodeScannerController, build_scan_shell
-from pages.ai_food_profile_service import fetch_ai_food_profile, get_last_ai_food_profile_error
+from pages.ai_food_profile_service import (
+    fetch_ai_food_profile,
+    get_ai_food_profile_service_signature,
+    get_last_ai_food_profile_error,
+)
 from pages.home_page import build_home_shell
 from pages.meal_suggestion_page import build_meal_suggestion_shell
 from pages.meal_suggestion_service import fetch_ai_meal_suggestions, rank_pantry_items
@@ -43,6 +48,13 @@ from pages.share_page import build_share_shell, build_my_shares_shell, build_sha
 from pages.donate_page import build_donate_shell, build_dashboard_shell
 from pages.ai_image_service import build_ai_food_image_url, build_ai_meal_image_url, build_meal_fallback_image_url
 from pages.open_food_facts import fetch_food_product, fetch_food_product_by_name
+from pages.product_cache import (
+    load_ai_profile,
+    load_product,
+    store_ai_profile,
+    store_product,
+    store_product_image,
+)
 from pages.product_info_page import build_product_info_shell
 from pages.theme import ThemeColors
 
@@ -57,6 +69,7 @@ def main(page: ft.Page):
     # Global page styling and initial window size.
     # The responsive layout code below still adapts when the window changes.
     page.title = "PantryIQ Connect"
+    page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 8
     page.bgcolor = ThemeColors.PAGE_BACKGROUND
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
@@ -72,6 +85,20 @@ def main(page: ft.Page):
 
     # Scanner controller owns camera lifecycle + barcode decoding flow.
     scanner_controller = BarcodeScannerController(page)
+    try:
+        stale_profile_count = db.clear_stale_product_ai_profiles(
+            get_ai_food_profile_service_signature()
+        )
+        if stale_profile_count:
+            scanner_controller.append_debug(
+                "product_cache",
+                f"Cleared {stale_profile_count} stale AI profile cache entries",
+            )
+    except sqlite3.Error as exc:
+        scanner_controller.append_debug(
+            "product_cache_error",
+            f"Could not clear stale AI profiles: {type(exc).__name__}: {exc}",
+        )
     # Track which screen should be displayed by render_current_view().
     # Dict wrapper is used so nested callbacks can mutate active state
     # without introducing nonlocal statements.
@@ -83,7 +110,6 @@ def main(page: ft.Page):
         "pantry_filter": "Expiring first",
         "pantry_draft": None,
         "selected_pantry_item_id": None,
-        "ai_profile_cache": {},
         "meal_plan": {"status": "idle", "suggestions": [], "image_urls": [], "images_loading": False, "selected_index": None},
         "meal_request_version": 0,
         "meal_inventory": [],
@@ -116,9 +142,6 @@ def main(page: ft.Page):
         _restored_user = db.get_user(view_state["user_id"])
         if _restored_user and isinstance(view_state.get("profile"), dict):
             view_state["profile"]["name"] = _restored_user["name"]
-
-    def _ai_profile_cache_key(product_name: str, categories: str) -> str:
-        return f"{product_name.strip().lower()}|{categories.strip().lower()}"
 
     def _set_profile_from_cache(product: dict, cached_profile: dict) -> None:
         product["ai_food_profile"] = dict(cached_profile)
@@ -224,24 +247,6 @@ def main(page: ft.Page):
                 int(item.get("qty") or 0) for item in view_state["pantry_products"]
             )
 
-    def warm_image_url(url: str) -> bool:
-        """Best-effort warm-up so generated image is likely ready by display time."""
-
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "PantryIQ-Connect/1.0 (github.com/kyleepinto-dot/Food-app)",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=12) as response:
-                # Read a small chunk to trigger upstream generation without
-                # blocking on full image download.
-                response.read(256)
-            return True
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
-            return False
-
     def fetch_image_data(url: str) -> bytes | None:
         """Download an AI image for portable display and local persistence."""
 
@@ -259,6 +264,45 @@ def main(page: ft.Page):
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
             return None
 
+    async def cache_product_image_async(product: dict, image_source: str, image_url: str) -> None:
+        cached_field = (
+            "_cached_off_image_data"
+            if image_source == "open_food_facts"
+            else "_cached_ai_image_data"
+        )
+        if isinstance(product.get(cached_field), bytes):
+            return
+
+        image_data = await asyncio.to_thread(fetch_image_data, image_url)
+        if image_data is None:
+            scanner_controller.append_debug(
+                "product_image_cache",
+                f"Could not download {image_source} image",
+            )
+            return
+
+        try:
+            await asyncio.to_thread(store_product_image, product, image_source, image_data)
+            count, total_bytes = await asyncio.to_thread(db.get_product_image_cache_stats)
+            scanner_controller.append_debug(
+                "product_image_cache",
+                f"Cached {image_source} image; count={count}, bytes={total_bytes}",
+            )
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            scanner_controller.append_debug(
+                "product_image_cache_error",
+                f"Could not cache {image_source} image: {type(exc).__name__}: {exc}",
+            )
+            return
+
+        if view_state.get("current") == "product" and view_state.get("product") is product:
+            render_current_view()
+
+    async def hydrate_open_food_facts_image_async(product: dict) -> None:
+        image_url = product.get("best_image_url")
+        if isinstance(image_url, str) and image_url:
+            await cache_product_image_async(product, "open_food_facts", image_url)
+
     async def hydrate_ai_image_async(product: dict, barcode_hint: str):
         """Attach AI image URL after initial product page render.
 
@@ -268,23 +312,21 @@ def main(page: ft.Page):
 
         if not isinstance(product, dict):
             return
-        if product.get("ai_image_url"):
+        if isinstance(product.get("_cached_ai_image_data"), bytes):
             return
 
         food_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
-        ai_image_url = build_ai_food_image_url(food_name=food_name, barcode=barcode_hint)
+        existing_url = product.get("ai_image_url")
+        ai_image_url = (
+            existing_url
+            if isinstance(existing_url, str) and existing_url
+            else build_ai_food_image_url(food_name=food_name, barcode=barcode_hint)
+        )
         if not isinstance(ai_image_url, str) or not ai_image_url:
             return
 
-        is_warmed = await asyncio.to_thread(warm_image_url, ai_image_url)
-        if not is_warmed:
-            return
-
         product["ai_image_url"] = ai_image_url
-
-        # Refresh only when the same product page is currently visible.
-        if view_state.get("current") == "product" and view_state.get("product") is product:
-            render_current_view()
+        await cache_product_image_async(product, "ai", ai_image_url)
 
     async def hydrate_ai_food_profile_async(product: dict):
         """Attach AI-derived risk/shelf/storage profile after initial render."""
@@ -297,12 +339,17 @@ def main(page: ft.Page):
         product_name = str(product.get("product_name") or product.get("generic_name") or "").strip()
         categories = str(product.get("categories") or "").strip()
 
-        cache_key = _ai_profile_cache_key(product_name, categories)
-        profile_cache = view_state.get("ai_profile_cache") or {}
-        cached_profile = profile_cache.get(cache_key)
+        try:
+            cached_profile = load_ai_profile(product)
+        except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
+            cached_profile = None
+            scanner_controller.append_debug(
+                "product_cache_error",
+                f"Could not load cached AI profile: {type(exc).__name__}: {exc}",
+            )
         if isinstance(cached_profile, dict):
             _set_profile_from_cache(product, cached_profile)
-            scanner_controller.append_debug("ai_food_profile", "AI profile cache hit")
+            scanner_controller.append_debug("ai_food_profile", "Persistent AI profile cache hit")
             if view_state.get("current") == "product" and view_state.get("product") is product:
                 render_current_view()
             return
@@ -319,13 +366,13 @@ def main(page: ft.Page):
 
         product["ai_food_profile"] = ai_profile
         product["ai_food_profile_cached"] = False
-        profile_cache[cache_key] = dict(ai_profile)
-        # Bound memory while keeping a useful recent working set.
-        if len(profile_cache) > 120:
-            oldest_key = next(iter(profile_cache), None)
-            if isinstance(oldest_key, str):
-                profile_cache.pop(oldest_key, None)
-        view_state["ai_profile_cache"] = profile_cache
+        try:
+            store_ai_profile(product, ai_profile)
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            scanner_controller.append_debug(
+                "product_cache_error",
+                f"Could not persist AI profile: {type(exc).__name__}: {exc}",
+            )
         provider_mode = str(ai_profile.get("_provider") or "remote").lower()
         if provider_mode == "remote":
             product["ai_food_profile_status"] = "ready"
@@ -819,9 +866,32 @@ def main(page: ft.Page):
             render_current_view()
 
     async def on_barcode_detected(barcode: str) -> bool:
-        # Query Open Food Facts off-thread so network calls do not block UI.
-        scanner_controller.append_debug("open_food_facts_lookup", f"Fetching product for barcode {barcode}")
-        product = await asyncio.to_thread(fetch_food_product, barcode)
+        product = None
+        try:
+            product = load_product(barcode)
+        except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
+            scanner_controller.append_debug(
+                "product_cache_error",
+                f"Could not load cached product: {type(exc).__name__}: {exc}",
+            )
+
+        if product is not None:
+            scanner_controller.append_debug(
+                "open_food_facts_lookup",
+                f"Persistent product cache hit for barcode {barcode}",
+            )
+        else:
+            # Query Open Food Facts off-thread so network calls do not block UI.
+            scanner_controller.append_debug("open_food_facts_lookup", f"Fetching product for barcode {barcode}")
+            product = await asyncio.to_thread(fetch_food_product, barcode)
+            if product is not None:
+                try:
+                    store_product(product, barcode)
+                except (sqlite3.Error, TypeError, ValueError) as exc:
+                    scanner_controller.append_debug(
+                        "product_cache_error",
+                        f"Could not persist product: {type(exc).__name__}: {exc}",
+                    )
         if product is None:
             scanner_controller.append_debug("open_food_facts_lookup", "No food product returned from service")
             return False
@@ -832,9 +902,11 @@ def main(page: ft.Page):
             view_state["product"] = product
             remember_recent_product(product)
             record_successful_scan()
-            product["ai_food_profile_status"] = "pending"
+            if not isinstance(product.get("ai_food_profile"), dict):
+                product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
+            page.run_task(hydrate_open_food_facts_image_async, product)
             page.run_task(hydrate_ai_image_async, product, barcode)
             page.run_task(hydrate_ai_food_profile_async, product)
             scanner_controller.append_debug("navigation", "Product view rendered successfully")
@@ -858,6 +930,13 @@ def main(page: ft.Page):
         if product is None:
             scanner_controller.append_debug("open_food_facts_name_lookup", "No matching food product returned")
             return False
+        try:
+            store_product(product)
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            scanner_controller.append_debug(
+                "product_cache_error",
+                f"Could not persist product name result: {type(exc).__name__}: {exc}",
+            )
 
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")
@@ -865,9 +944,11 @@ def main(page: ft.Page):
             view_state["product"] = product
             remember_recent_product(product)
             record_successful_scan()
-            product["ai_food_profile_status"] = "pending"
+            if not isinstance(product.get("ai_food_profile"), dict):
+                product["ai_food_profile_status"] = "pending"
             view_state["current"] = "product"
             render_current_view()
+            page.run_task(hydrate_open_food_facts_image_async, product)
             page.run_task(hydrate_ai_image_async, product, str(product.get("code") or ""))
             page.run_task(hydrate_ai_food_profile_async, product)
             scanner_controller.append_debug("navigation", "Product view rendered successfully (manual name)")

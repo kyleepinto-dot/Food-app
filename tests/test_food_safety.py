@@ -28,10 +28,23 @@ import shutil
 import tempfile
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
+
+import cv2
+import numpy as np
 
 # Let Python find db.py / queries.py, which live one folder up from tests/.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db     # noqa: E402
+from pages.product_cache import (
+    AI_PROFILE_GUIDANCE_VERSION,
+    load_ai_profile,
+    load_product,
+    prepare_image_for_cache,
+    store_ai_profile,
+    store_product,
+)
+from pages.ai_food_profile_service import get_ai_food_profile_service_signature
 
 
 class FoodSafetyTests(unittest.TestCase):
@@ -138,9 +151,126 @@ class FoodSafetyTests(unittest.TestCase):
 
         cached = db.load_meal_plan_cache(owner, "pantry-signature-a")
         self.assertIsNotNone(cached)
+        assert cached is not None
         self.assertEqual(suggestions, cached["suggestions"])
         self.assertEqual([b"image-bytes"], cached["image_sources"])
         self.assertIsNone(db.load_meal_plan_cache(owner, "pantry-signature-b"))
+
+    def test_product_scan_cache_persists_product_and_ai_profile(self):
+        product = {
+            "code": "0898999000022",
+            "product_name": "Coconut Water",
+            "categories": "Beverages",
+            "best_image_url": "https://example.test/open-food-facts.jpg",
+            "ai_image_url": "https://example.test/generated.jpg",
+        }
+        profile = {
+            "risk": "Low Risk",
+            "storage": "Refrigerate after opening.",
+            "_provider": "remote",
+        }
+
+        store_product(product, "898999000022")
+        store_ai_profile(product, profile)
+        cache_key = str(product["_product_cache_key"])
+        db.save_product_image_cache(cache_key, "open_food_facts", b"off-image", "image/jpeg")
+        db.save_product_image_cache(cache_key, "ai", b"ai-image", "image/jpeg")
+        db.init_db()
+
+        restored = load_product("0898999000022")
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual(restored["product_name"], "Coconut Water")
+        self.assertEqual(restored["best_image_url"], "https://example.test/open-food-facts.jpg")
+        self.assertNotIn("ai_image_url", restored)
+        expected_profile = {
+            **profile,
+            "_guidance_version": AI_PROFILE_GUIDANCE_VERSION,
+            "_service_input_signature": get_ai_food_profile_service_signature(),
+        }
+        self.assertEqual(restored["ai_food_profile"], expected_profile)
+        self.assertTrue(restored["ai_food_profile_cached"])
+        self.assertEqual(restored["_cached_off_image_data"], b"off-image")
+        self.assertEqual(restored["_cached_ai_image_data"], b"ai-image")
+        self.assertEqual(load_ai_profile(restored), expected_profile)
+
+    def test_changed_ai_service_signature_clears_only_cached_profiles(self):
+        product = {
+            "code": "0898999000022",
+            "product_name": "Coconut Water",
+            "categories": "Beverages",
+        }
+        store_product(product)
+        store_ai_profile(
+            product,
+            {
+                "risk": "Low Risk",
+                "storage": "After opening: refrigerate.",
+                "_provider": "remote",
+            },
+        )
+        cache_key = str(product["_product_cache_key"])
+        db.save_product_image_cache(cache_key, "ai", b"ai-image", "image/jpeg")
+
+        cleared = db.clear_stale_product_ai_profiles("different-service-signature")
+        restored = load_product("0898999000022")
+
+        self.assertEqual(cleared, 1)
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertNotIn("ai_food_profile", restored)
+        self.assertEqual(restored["_cached_ai_image_data"], b"ai-image")
+
+    def test_product_cache_hit_does_not_require_open_food_facts(self):
+        product = {
+            "code": "0898999000022",
+            "product_name": "Coconut Water",
+            "categories": "Beverages",
+        }
+        store_product(product)
+
+        remote_calls = 0
+        restored = load_product("898999000022")
+        if restored is None:
+            remote_calls += 1
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(remote_calls, 0)
+
+    def test_product_image_cache_resizes_and_compresses_images(self):
+        image = np.full((1600, 2200, 3), (40, 120, 220), dtype=np.uint8)
+        saved, encoded = cv2.imencode(".png", image)
+        self.assertTrue(saved)
+
+        cached_image = prepare_image_for_cache(encoded.tobytes())
+
+        self.assertIsNotNone(cached_image)
+        assert cached_image is not None
+        decoded = cv2.imdecode(np.frombuffer(cached_image, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertIsNotNone(decoded)
+        assert decoded is not None
+        self.assertLessEqual(max(decoded.shape[:2]), 1024)
+        self.assertLessEqual(len(cached_image), db.PRODUCT_IMAGE_CACHE_MAX_ITEM_BYTES)
+
+    def test_product_image_cache_enforces_count_and_byte_limits(self):
+        with (
+            patch.object(db, "PRODUCT_IMAGE_CACHE_MAX_COUNT", 3),
+            patch.object(db, "PRODUCT_IMAGE_CACHE_MAX_BYTES", 10),
+            patch.object(db, "PRODUCT_IMAGE_CACHE_MAX_ITEM_BYTES", 10),
+        ):
+            for index in range(4):
+                db.save_product_image_cache(
+                    f"barcode:{index}",
+                    "ai",
+                    bytes([index]) * 4,
+                    "image/jpeg",
+                )
+
+            count, total_bytes = db.get_product_image_cache_stats()
+            self.assertEqual(count, 2)
+            self.assertEqual(total_bytes, 8)
+            self.assertEqual(db.load_product_image_cache("barcode:0"), {})
+            self.assertEqual(db.load_product_image_cache("barcode:3")["ai"], bytes([3]) * 4)
 
 
 if __name__ == "__main__":

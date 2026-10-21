@@ -17,8 +17,10 @@ SCAN_WINDOW_LEFT_RATIO = 0.11
 SCAN_WINDOW_TOP_RATIO = 0.34
 SCAN_WINDOW_WIDTH_RATIO = 0.78
 SCAN_WINDOW_HEIGHT_RATIO = 0.38
-CAMERA_PREVIEW_ASPECT_RATIO = 4 / 3
+CAMERA_LANDSCAPE_ASPECT_RATIO = 4 / 3
+CAMERA_PORTRAIT_ASPECT_RATIO = 3 / 4
 SCANNER_VERTICAL_UI_RESERVE = 300
+SCANNER_PORTRAIT_VERTICAL_UI_RESERVE = 270
 IMAGE_PROCESSING_DEBUG = True
 IMAGE_PROCESSING_DEBUG_ROOT = Path("scanner_debug_images")
 BARCODE_RECTIFY_HORIZONTAL_MARGIN_RATIO = 0.08
@@ -35,13 +37,29 @@ PYZBAR_CANDIDATE_NAMES = (
 )
 
 
+def get_camera_preview_aspect_ratio(metrics: dict) -> float:
+    is_phone_portrait = (
+        not metrics["is_desktop"]
+        and not metrics.get("is_tablet", False)
+        and metrics["shell_width"] <= 500
+        and metrics["shell_height"] > metrics["shell_width"]
+    )
+    return CAMERA_PORTRAIT_ASPECT_RATIO if is_phone_portrait else CAMERA_LANDSCAPE_ASPECT_RATIO
+
+
 def get_camera_preview_dimensions(metrics: dict) -> tuple[int, int]:
+    aspect_ratio = get_camera_preview_aspect_ratio(metrics)
+    vertical_ui_reserve = (
+        SCANNER_PORTRAIT_VERTICAL_UI_RESERVE
+        if aspect_ratio == CAMERA_PORTRAIT_ASPECT_RATIO
+        else SCANNER_VERTICAL_UI_RESERVE
+    )
     width_limit = int(metrics["shell_width"] * (0.9 if metrics["is_desktop"] else 0.92))
-    height_limit = max(220, int(metrics["shell_height"]) - SCANNER_VERTICAL_UI_RESERVE)
-    width_limited_height = round(width_limit / CAMERA_PREVIEW_ASPECT_RATIO)
+    height_limit = max(220, int(metrics["shell_height"]) - vertical_ui_reserve)
+    width_limited_height = round(width_limit / aspect_ratio)
     if width_limited_height <= height_limit:
         return width_limit, width_limited_height
-    return round(height_limit * CAMERA_PREVIEW_ASPECT_RATIO), height_limit
+    return round(height_limit * aspect_ratio), height_limit
 
 
 def build_nav_item(icon: ft.IconData, label: str, selected: bool = False, compact: bool = False) -> ft.Column:
@@ -123,6 +141,7 @@ class BarcodeScannerController:
         if self.camera is not None:
             self.camera.width = preview_width
             self.camera.height = preview_height
+            self.camera.aspect_ratio = get_camera_preview_aspect_ratio(metrics)
         if self.camera_panel is not None:
             self.camera_panel.width = preview_width
             self.camera_panel.height = preview_height
@@ -1193,7 +1212,7 @@ def build_scan_shell(
         camera.expand = False
         camera.width = preview_frame_width
         camera.height = scanner_surface_height
-        camera.aspect_ratio = CAMERA_PREVIEW_ASPECT_RATIO
+        camera.aspect_ratio = get_camera_preview_aspect_ratio(metrics)
     mask_color = "#33000000"
 
     # Light translucent panels keep the full camera visible while leaving a
@@ -1604,34 +1623,6 @@ def build_scan_shell(
                 ],
             ),
         ),
-        ft.Container(
-            bgcolor="#FFFFFF",
-            border_radius=16,
-            padding=ft.Padding(left=12, top=10, right=12, bottom=10),
-            content=ft.Row(
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-                controls=[
-                    ft.Text("📡", size=30),
-                    ft.Column(
-                        spacing=4,
-                        controls=[
-                            ft.Text(
-                                "Scan Product Barcode",
-                                size=26 if metrics["is_desktop"] else 20,
-                                weight=ft.FontWeight.BOLD,
-                                color="#0A1A12",
-                            ),
-                            ft.Text(
-                                "Scan to automatically get shelf life info or enter the product name manually.",
-                                size=15,
-                                color="#3D4658",
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-        ),
         scanner_surface,
         ft.Row(
             alignment=ft.MainAxisAlignment.CENTER,
@@ -1724,8 +1715,8 @@ def build_scan_shell(
         content=ft.Stack(
             controls=[
                 ft.Column(
-                    # Page layout order: top navigation, action controls, status lines,
-                    # then preview area that hosts camera or fallback message.
+                    # Keep the preview, camera actions, and status together at the
+                    # top so phone users can see the complete capture workflow.
                     spacing=ThemeColors.SECTION_SPACING,
                     scroll=ft.ScrollMode.AUTO,
                     controls=page_controls,

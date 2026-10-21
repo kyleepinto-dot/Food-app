@@ -38,7 +38,12 @@ def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: s
     def field(hint, password=False):
         return ft.TextField(
             hint_text=hint, password=password, can_reveal_password=password,
-            border_radius=12, border_color="#D8D4C6", focused_border_color=T.BRAND_PRIMARY,
+            border_radius=12,
+            border_color=T.INPUT_BORDER,
+            focused_border_color=T.BRAND_PRIMARY,
+            color=T.TEXT_PRIMARY,
+            cursor_color=T.BRAND_PRIMARY,
+            hint_style=ft.TextStyle(color=T.TEXT_PLACEHOLDER),
         )
 
     name_in = field("Your name")
@@ -82,7 +87,7 @@ def build_welcome_shell(metrics: dict, mode: str, on_submit, on_switch, error: s
                     size=26 if metrics["is_desktop"] else 22, weight=ft.FontWeight.BOLD, color="#FFFFFF"),
             ft.Text("Scan any food to check freshness & nutrition, track your pantry, get "
                     "recipe ideas — and pass on what you won't use to friends, neighbors, "
-                    "and local food banks.", size=13, color="#CBD8CC"),
+                    "and local food banks.", size=13, color=T.TEXT_ON_DARK_SECONDARY),
             ft.Row(wrap=True, spacing=8, run_spacing=8, controls=[
                 _brand_chip("🔍 Food IQ Scanner"), _brand_chip("📦 Smart Pantry"), _brand_chip("🤝 Share & Donate"),
             ]),

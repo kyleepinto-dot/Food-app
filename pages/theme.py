@@ -39,6 +39,10 @@ class ThemeColors:
     TEXT_SECONDARY = "#2A2A2A"
     TEXT_TERTIARY = "#303030"
     TEXT_INACTIVE = "#6E6E6E"
+    TEXT_PLACEHOLDER = "#59635E"
+    TEXT_ON_DARK_SECONDARY = "#E6EFE8"
+    INPUT_BACKGROUND = "#FFFFFF"
+    INPUT_BORDER = "#8E9A94"
 
     # Component surfaces and accents used by cards, tracker, and preview fallback.
     CARD_BACKGROUND = "#FFF0BF"

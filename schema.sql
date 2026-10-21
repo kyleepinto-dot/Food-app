@@ -202,3 +202,29 @@ CREATE TABLE IF NOT EXISTS meal_plan_images (
     FOREIGN KEY (user_id, inventory_signature)
         REFERENCES meal_plan_cache(user_id, inventory_signature)
 );
+
+
+-- Cached scanned products -----------------------------------------------------
+-- Product metadata and AI-derived food profiles are persisted independently.
+-- Image bytes are intentionally excluded; remote image URLs remain part of
+-- the Open Food Facts payload and are resolved normally by the product page.
+CREATE TABLE IF NOT EXISTS product_scan_cache (
+    cache_key        TEXT PRIMARY KEY,
+    barcode          TEXT,
+    product_json     TEXT NOT NULL,
+    ai_profile_json  TEXT,
+    product_updated_on TEXT DEFAULT (datetime('now')),
+    profile_updated_on TEXT
+);
+
+CREATE TABLE IF NOT EXISTS product_image_cache (
+    cache_key        TEXT NOT NULL,
+    image_source     TEXT NOT NULL,
+    image_data       BLOB NOT NULL,
+    mime_type        TEXT NOT NULL,
+    byte_size        INTEGER NOT NULL,
+    created_on       TEXT DEFAULT (datetime('now')),
+    last_accessed_on TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (cache_key, image_source),
+    FOREIGN KEY (cache_key) REFERENCES product_scan_cache(cache_key)
+);

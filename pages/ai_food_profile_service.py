@@ -1,11 +1,21 @@
+import hashlib
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from functools import lru_cache
+from pathlib import Path
 
 
 _LAST_PROFILE_ERROR = ""
+
+
+@lru_cache(maxsize=1)
+def get_ai_food_profile_service_signature() -> str:
+    """Fingerprint service code so cached outputs expire after behavior changes."""
+
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def _normalize_factor_level(value: str, default: str = "Medium") -> str:
@@ -49,7 +59,7 @@ def _default_fattom_by_risk(risk: str) -> dict:
     }
 
 
-def _clean_text(value: str, default: str) -> str:
+def _clean_text(value: object, default: str) -> str:
     text = str(value or "").strip()
     return text if text else default
 
@@ -92,8 +102,8 @@ def _extract_labeled_profile(text: str) -> dict | None:
     Supported forms:
     - risk: High Risk
     - confidence: Medium Confidence
-    - shelf_life: 3-7 days
-    - storage: Keep refrigerated.
+    - shelf_life: Unopened: follow package date. After opening: 3-7 days.
+    - storage: Before opening: refrigerate. After opening: refrigerate and reseal.
     """
 
     if not text:
@@ -130,6 +140,12 @@ def _extract_labeled_profile(text: str) -> dict | None:
 
     if not all([risk_match, confidence_match, shelf_match, storage_match, immediate_actions_match, warnings_match]):
         return None
+    assert risk_match is not None
+    assert confidence_match is not None
+    assert shelf_match is not None
+    assert storage_match is not None
+    assert immediate_actions_match is not None
+    assert warnings_match is not None
 
     risk_value = str(risk_match.group(1)).strip()
     confidence_value = str(confidence_match.group(1)).strip()
@@ -174,6 +190,22 @@ def _normalize_confidence(value: str) -> str:
     return "Medium Confidence"
 
 
+def _has_package_state_context(value: str) -> bool:
+    text = str(value or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "unopened",
+            "before opening",
+            "after opening",
+            "once opened",
+            "opening not applicable",
+            "after preparation",
+            "after cooking",
+        )
+    )
+
+
 def _parse_profile_response(raw_text: str) -> dict | None:
     payload = _extract_json_object(raw_text)
     if not isinstance(payload, dict):
@@ -187,6 +219,8 @@ def _parse_profile_response(raw_text: str) -> dict | None:
     storage = _clean_text(payload.get("storage"), "Store in a cool place and refrigerate after opening if needed.")
     immediate_actions = _clean_text(payload.get("immediate_actions"), "Use oldest stock first and follow package instructions.")
     warnings = _clean_text(payload.get("warnings"), "Discard if strong odor, mold, or unusual texture appears.")
+    if not _has_package_state_context(shelf_life) or not _has_package_state_context(storage):
+        return None
 
     fattom_payload = payload.get("fattom")
     risk_based_default = _default_fattom_by_risk(risk)
@@ -235,9 +269,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "High Risk",
             "confidence": "High Confidence",
-            "shelf_life": "3-7 days",
-            "storage": "Keep refrigerated at 1-4C and reseal tightly after each use.",
-            "immediate_actions": "Refrigerate immediately after purchase and consume opened containers first.",
+            "shelf_life": "Unopened: follow the package date. After opening: use within 3-7 days.",
+            "storage": "Unopened and after opening: keep refrigerated at 1-4C; reseal tightly after opening.",
+            "immediate_actions": "If unopened, refrigerate promptly. After opening, mark the date and use that container first.",
             "warnings": "Discard if sour smell, curdling, gas buildup, or visible mold appears.",
             "fattom": {
                 "food": "High",
@@ -253,9 +287,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "High Risk",
             "confidence": "High Confidence",
-            "shelf_life": "1-3 days",
-            "storage": "Store in the coldest refrigerator zone and cook or freeze promptly.",
-            "immediate_actions": "Portion now, refrigerate what will be used soon, and freeze remaining portions today.",
+            "shelf_life": "Unopened or after opening: use within 1-3 refrigerated days, or freeze sooner.",
+            "storage": "Unopened and after opening: store in the coldest refrigerator zone; keep wrapped and cook or freeze promptly.",
+            "immediate_actions": "If unopened, keep sealed until use. After opening, portion immediately and freeze what will not be cooked soon.",
             "warnings": "Discard if off-odor, slimy texture, color change, or package swelling is present.",
             "fattom": {
                 "food": "High",
@@ -271,9 +305,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "Low Risk",
             "confidence": "Medium Confidence",
-            "shelf_life": "1-3 months",
-            "storage": "Keep continuously frozen and avoid repeated thaw-refreeze cycles.",
-            "immediate_actions": "Keep unopened until needed and return promptly to freezer after each use.",
+            "shelf_life": "Unopened: follow the package date. After opening: use within 1-3 months for best quality.",
+            "storage": "Unopened and after opening: keep continuously frozen; reseal opened packaging and avoid thaw-refreeze cycles.",
+            "immediate_actions": "If unopened, leave sealed until needed. After opening, remove one portion and return the package promptly to the freezer.",
             "warnings": "Discard if thawed for extended time, freezer-burned with off odor, or damaged packaging is found.",
             "fattom": {
                 "food": "Low",
@@ -289,9 +323,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "Medium Risk",
             "confidence": "Medium Confidence",
-            "shelf_life": "2-5 days",
-            "storage": "Store sealed at room temperature and freeze extra portions early.",
-            "immediate_actions": "Set aside a freeze portion now and use room-temperature stock within a few days.",
+            "shelf_life": "Unopened: follow the package date. After opening: use within 2-5 days or freeze.",
+            "storage": "Before opening: follow the label. After opening: reseal at room temperature and freeze extra portions early.",
+            "immediate_actions": "If unopened, keep the package sealed. After opening, set aside a freezer portion and use room-temperature stock first.",
             "warnings": "Discard if mold spots, fermented odor, or unusual stickiness develops.",
             "fattom": {
                 "food": "Medium",
@@ -307,9 +341,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "Low Risk",
             "confidence": "Medium Confidence",
-            "shelf_life": "2-6 months",
-            "storage": "Store sealed in a cool, dry cabinet away from humidity and sunlight.",
-            "immediate_actions": "Seal tightly after opening and keep container away from heat and moisture.",
+            "shelf_life": "Unopened: follow the package date. After opening: use within 2-6 months for best quality.",
+            "storage": "Before opening: keep in a cool, dry cabinet. After opening: seal airtight and protect from humidity, heat, and sunlight.",
+            "immediate_actions": "If unopened, leave sealed. After opening, transfer to an airtight container if the original package does not reseal.",
             "warnings": "Discard if pests, rancid odor, visible moisture damage, or clumping from spoilage is present.",
             "fattom": {
                 "food": "Low",
@@ -325,9 +359,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "Medium Risk",
             "confidence": "Medium Confidence",
-            "shelf_life": "3-10 days",
-            "storage": "Keep produce dry and refrigerated when needed; use ripe items first.",
-            "immediate_actions": "Sort produce today, use ripest items first, and prep extras before quality drops.",
+            "shelf_life": "Opening not applicable: use fresh produce within approximately 3-10 days.",
+            "storage": "Opening not applicable: keep produce dry and refrigerate when appropriate; use ripe items first.",
+            "immediate_actions": "Opening not applicable: sort produce today and prepare or freeze extra ripe pieces before quality drops.",
             "warnings": "Discard pieces with mold spread, fermented odor, or slimy breakdown.",
             "fattom": {
                 "food": "Medium",
@@ -343,9 +377,9 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
     return {
         "risk": "Medium Risk",
         "confidence": "Low Confidence",
-        "shelf_life": "5-10 days",
-        "storage": "Follow label storage instructions and refrigerate after opening if required.",
-        "immediate_actions": "Check label guidance now and move opened items to proper storage immediately.",
+        "shelf_life": "Unopened: follow the printed package date. After opening: check the label; if absent, use within 5-10 days.",
+        "storage": "Before opening: follow label storage instructions. After opening: refrigerate if required and keep tightly sealed.",
+        "immediate_actions": "If unopened, check the package date. After opening, mark the open date and move the product to its labeled storage location.",
         "warnings": "Discard if package is swollen, leaking, moldy, or has unusual odor/texture.",
         "fattom": {
             "food": "Medium",
@@ -376,9 +410,11 @@ def fetch_ai_food_profile(product_name: str, categories: str) -> dict | None:
             "risk,confidence,shelf_life,storage,immediate_actions,warnings,fattom. "
             "risk must be High Risk, Medium Risk, or Low Risk. "
             "confidence must be High Confidence, Medium Confidence, or Low Confidence. "
-            "shelf_life must be short text like 3-7 days or 2-4 weeks. "
-            "storage must be one concise practical sentence. "
-            "immediate_actions must be one concise actionable sentence. "
+            "shelf_life must explicitly distinguish 'Unopened:' from 'After opening:'; "
+            "for unpackaged foods use 'Opening not applicable:'. Never give an unlabeled duration. "
+            "storage must explicitly distinguish 'Before opening:' from 'After opening:'; "
+            "for unpackaged foods use 'Opening not applicable:'. "
+            "immediate_actions must clearly say what to do if unopened and what to do after opening. "
             "warnings must be one concise food-safety warning sentence. "
             "fattom must be an object with keys food,acidity,time,temperature,oxygen,moisture. "
             "Each fattom value must be exactly one of Low, Medium, High. "

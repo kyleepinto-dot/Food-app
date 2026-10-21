@@ -1,7 +1,21 @@
 import flet as ft
-from typing import cast
+from typing import TypedDict, cast
 
 from pages.theme import ThemeColors
+
+
+class ProductImageSource(TypedDict):
+    label: str
+    source: str | bytes
+
+
+def _product_title_size(product_name: str, metrics: dict) -> int:
+    name_length = len(product_name.strip())
+    if metrics["is_desktop"]:
+        return 34 if name_length <= 28 else 30 if name_length <= 56 else 26
+    if metrics["is_tablet"]:
+        return 28 if name_length <= 28 else 24 if name_length <= 56 else 20
+    return 26 if name_length <= 28 else 22 if name_length <= 56 else 18
 
 
 def _normalize_fattom_level(value: str, default: str = "Medium") -> str:
@@ -162,25 +176,25 @@ def _derive_food_profile(product: dict) -> dict:
     if any(word in text for word in ["milk", "yogurt", "cream", "cheese", "fish", "chicken", "meat"]):
         risk = "High Risk"
         confidence = "High Confidence"
-        shelf = "3-7 days"
-        storage = "Store in refrigerator between 34-40F (1-4C)."
+        shelf = "Unopened: follow the package date. After opening: use within 3-7 days."
+        storage = "Before opening and after opening: store in the refrigerator between 34-40F (1-4C)."
     elif any(word in text for word in ["potato", "onion", "garlic", "apple", "orange", "banana"]):
         risk = "Medium Risk"
         confidence = "High Confidence"
-        shelf = "2-4 weeks"
-        storage = "Store in a cool, dry place away from direct sunlight."
+        shelf = "Opening not applicable: use within approximately 2-4 weeks."
+        storage = "Opening not applicable: store in a cool, dry place away from direct sunlight."
     else:
         risk = "Medium Risk"
         confidence = "Medium Confidence"
-        shelf = "5-10 days"
-        storage = "Store in a cool place and refrigerate after opening if needed."
+        shelf = "Unopened: follow the package date. After opening: use within 5-10 days unless the label says otherwise."
+        storage = "Before opening: store in a cool place. After opening: refrigerate if required by the label."
 
     return {
         "risk": risk,
         "confidence": confidence,
         "shelf_life": shelf,
         "storage": storage,
-        "immediate_actions": "Keep in a cool place and use oldest stock first.",
+        "immediate_actions": "If unopened, check the package date. After opening, mark the date and use the opened product first.",
         "warnings": "Discard if strong odor, mold, or unusual texture appears.",
         "fattom": _derive_default_fattom_from_text(text, risk),
         "source": "Fallback",
@@ -393,14 +407,20 @@ def build_product_info_shell(
 
     summary_text = f"{product_name} is categorized as {category_text}. {profile['storage']}"
 
-    image_sources: list[dict[str, str]] = []
+    image_sources: list[ProductImageSource] = []
     ai_image_url = product.get("ai_image_url")
     off_image_url = product.get("best_image_url")
+    cached_off_image = product.get("_cached_off_image_data")
+    cached_ai_image = product.get("_cached_ai_image_data")
 
-    if isinstance(off_image_url, str) and off_image_url:
-        image_sources.append({"label": "Open Food Facts", "url": off_image_url})
-    if isinstance(ai_image_url, str) and ai_image_url:
-        image_sources.append({"label": "AI Image", "url": ai_image_url})
+    if isinstance(cached_off_image, bytes):
+        image_sources.append({"label": "Open Food Facts", "source": cached_off_image})
+    elif isinstance(off_image_url, str) and off_image_url:
+        image_sources.append({"label": "Open Food Facts", "source": off_image_url})
+    if isinstance(cached_ai_image, bytes):
+        image_sources.append({"label": "AI Image", "source": cached_ai_image})
+    elif isinstance(ai_image_url, str) and ai_image_url:
+        image_sources.append({"label": "AI Image", "source": ai_image_url})
 
     header_controls: list[ft.Control] = [
         ft.IconButton(ft.Icons.ARROW_BACK_IOS_NEW, on_click=on_back_to_scan_click, icon_color="#0F0F0F"),
@@ -418,7 +438,7 @@ def build_product_info_shell(
         initial_index = 0
 
         active_image = {"index": initial_index}
-        gallery_image = ft.Image(src=image_sources[initial_index]["url"], height=210)
+        gallery_image = ft.Image(src=image_sources[initial_index]["source"], height=210)
         source_label = ft.Text(
             image_sources[initial_index]["label"],
             size=11,
@@ -433,8 +453,8 @@ def build_product_info_shell(
         def set_active_image(next_index: int) -> None:
             active_image["index"] = next_index % len(image_sources)
             current = image_sources[active_image["index"]]
-            gallery_image.src = current["url"]
-            source_label.value = current["label"]
+            gallery_image.src = current["source"]
+            source_label.value = str(current["label"])
             for i, dot in enumerate(indicator_dots):
                 dot.value = "●" if i == active_image["index"] else "○"
 
@@ -559,7 +579,14 @@ def build_product_info_shell(
                     content=ft.Column(
                         spacing=6,
                         controls=[
-                            ft.Text(product_name, size=36 if metrics["is_desktop"] else 30, color="#FFFFFF", weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                product_name,
+                                size=_product_title_size(product_name, metrics),
+                                color="#FFFFFF",
+                                weight=ft.FontWeight.BOLD,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
                             ft.Row(
                                 spacing=8,
                                 controls=[
@@ -596,11 +623,11 @@ def build_product_info_shell(
             controls=[
                 ft.Container(
                     expand=True,
-                    content=_line("Storage Recommendation", profile["storage"], "🧊"),
+                    content=_line("Storage by Package State", profile["storage"], "🧊"),
                 ),
                 ft.Container(
                     expand=True,
-                    content=_line("Shelf Life", profile["shelf_life"], "📅"),
+                    content=_line("Shelf Life by Package State", profile["shelf_life"], "📅"),
                 ),
             ],
         )
@@ -608,8 +635,8 @@ def build_product_info_shell(
         storage_cards = ft.Column(
             spacing=10,
             controls=[
-                _line("Storage Recommendation", profile["storage"], "🧊"),
-                _line("Shelf Life", profile["shelf_life"], "📅"),
+                _line("Storage by Package State", profile["storage"], "🧊"),
+                _line("Shelf Life by Package State", profile["shelf_life"], "📅"),
             ],
         )
 
@@ -620,9 +647,9 @@ def build_product_info_shell(
         storage_cards,
         _line("Immediate Actions", profile["immediate_actions"], "✅"),
         _line("Warnings", profile["warnings"], "⚠️"),
+        _line("Waste Reduction Tips", handling_tips["waste_tip"], "♻️"),
         ft.Text("FATTOM Dashboard", size=13, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
         _fattom_grid(metrics, profile.get("fattom") or {}),
-        _line("Waste Reduction Tips", handling_tips["waste_tip"], "♻️"),
     ]
 
     if bool(handling_tips.get("ethylene_needed")):
@@ -636,6 +663,9 @@ def build_product_info_shell(
         width=132,
         height=48,
         border_radius=12,
+        bgcolor=ThemeColors.INPUT_BACKGROUND,
+        color=ThemeColors.TEXT_PRIMARY,
+        label_style=ft.TextStyle(color=ThemeColors.TEXT_SECONDARY),
         border_color=ThemeColors.GREEN_TEXT,
         focused_border_color="#2E5D4E",
     )

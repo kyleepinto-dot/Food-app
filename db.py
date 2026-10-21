@@ -27,6 +27,9 @@ def _now():
 HERE        = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(HERE, "pantry.db")
 SCHEMA_PATH = os.path.join(HERE, "schema.sql")
+PRODUCT_IMAGE_CACHE_MAX_COUNT = 20
+PRODUCT_IMAGE_CACHE_MAX_BYTES = 30 * 1024 * 1024
+PRODUCT_IMAGE_CACHE_MAX_ITEM_BYTES = 2 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +190,209 @@ def load_meal_plan_cache(user_id: int, inventory_signature: str) -> dict | None:
         if isinstance(image_index, int) and 0 <= image_index < len(images) and isinstance(image_data, bytes):
             images[image_index] = image_data
     return {"suggestions": suggestions, "image_sources": images}
+
+
+def save_product_scan_cache(cache_key: str, barcode: str | None, product: dict) -> None:
+    """Persist Open Food Facts metadata without generated AI image state."""
+
+    cached_product = dict(product)
+    for transient_key in (
+        "_product_cache_key",
+        "ai_food_profile",
+        "ai_food_profile_cached",
+        "ai_food_profile_status",
+        "ai_image_url",
+    ):
+        cached_product.pop(transient_key, None)
+
+    payload = json.dumps(cached_product, separators=(",", ":"), ensure_ascii=True)
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        con.execute(
+            """INSERT INTO product_scan_cache
+               (cache_key, barcode, product_json, product_updated_on)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(cache_key) DO UPDATE SET
+                   barcode=excluded.barcode,
+                   product_json=excluded.product_json,
+                   product_updated_on=excluded.product_updated_on""",
+            (cache_key, barcode, payload),
+        )
+
+
+def save_product_ai_profile(cache_key: str, profile: dict) -> None:
+    """Attach an AI food profile to an existing cached product."""
+
+    payload = json.dumps(profile, separators=(",", ":"), ensure_ascii=True)
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        cursor = con.execute(
+            """UPDATE product_scan_cache
+               SET ai_profile_json=?, profile_updated_on=datetime('now')
+               WHERE cache_key=?""",
+            (payload, cache_key),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(f"No cached product exists for {cache_key}")
+
+
+def load_product_scan_cache(cache_key: str) -> dict | None:
+    """Load persisted product metadata and its optional AI food profile."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con:
+        row = con.execute(
+            """SELECT barcode, product_json, ai_profile_json
+               FROM product_scan_cache
+               WHERE cache_key=?""",
+            (cache_key,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    product = json.loads(row[1])
+    if not isinstance(product, dict):
+        raise ValueError(f"Cached product payload for {cache_key} is not an object")
+
+    profile = None
+    if row[2] is not None:
+        profile = json.loads(row[2])
+        if not isinstance(profile, dict):
+            raise ValueError(f"Cached AI profile for {cache_key} is not an object")
+
+    return {
+        "barcode": row[0],
+        "product": product,
+        "ai_profile": profile,
+    }
+
+
+def clear_product_ai_profile_cache() -> int:
+    """Remove every persisted AI profile while preserving product metadata."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        cursor = con.execute(
+            """UPDATE product_scan_cache
+               SET ai_profile_json=NULL, profile_updated_on=NULL
+               WHERE ai_profile_json IS NOT NULL"""
+        )
+    return max(0, cursor.rowcount)
+
+
+def clear_stale_product_ai_profiles(service_signature: str) -> int:
+    """Remove cached profiles produced by a different service implementation."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        rows = con.execute(
+            """SELECT cache_key, ai_profile_json
+               FROM product_scan_cache
+               WHERE ai_profile_json IS NOT NULL"""
+        ).fetchall()
+        stale_keys: list[str] = []
+        for cache_key, payload in rows:
+            try:
+                profile = json.loads(payload)
+            except (TypeError, ValueError):
+                stale_keys.append(str(cache_key))
+                continue
+            if (
+                not isinstance(profile, dict)
+                or profile.get("_service_input_signature") != service_signature
+            ):
+                stale_keys.append(str(cache_key))
+
+        con.executemany(
+            """UPDATE product_scan_cache
+               SET ai_profile_json=NULL, profile_updated_on=NULL
+               WHERE cache_key=?""",
+            ((cache_key,) for cache_key in stale_keys),
+        )
+    return len(stale_keys)
+
+
+def _evict_product_image_cache(con: sqlite3.Connection) -> None:
+    while True:
+        count, total_bytes = con.execute(
+            "SELECT COUNT(*), COALESCE(SUM(byte_size), 0) FROM product_image_cache"
+        ).fetchone()
+        if count <= PRODUCT_IMAGE_CACHE_MAX_COUNT and total_bytes <= PRODUCT_IMAGE_CACHE_MAX_BYTES:
+            return
+
+        oldest = con.execute(
+            """SELECT cache_key, image_source
+               FROM product_image_cache
+               ORDER BY last_accessed_on ASC, created_on ASC, rowid ASC
+               LIMIT 1"""
+        ).fetchone()
+        if oldest is None:
+            return
+        con.execute(
+            "DELETE FROM product_image_cache WHERE cache_key=? AND image_source=?",
+            oldest,
+        )
+
+
+def save_product_image_cache(
+    cache_key: str,
+    image_source: str,
+    image_data: bytes,
+    mime_type: str,
+) -> None:
+    """Persist one bounded product image and enforce global LRU limits."""
+
+    if image_source not in {"open_food_facts", "ai"}:
+        raise ValueError(f"Unsupported product image source: {image_source}")
+    if not image_data:
+        raise ValueError("Cached product image cannot be empty")
+    if len(image_data) > PRODUCT_IMAGE_CACHE_MAX_ITEM_BYTES:
+        raise ValueError(
+            f"Cached product image exceeds {PRODUCT_IMAGE_CACHE_MAX_ITEM_BYTES} bytes"
+        )
+
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        con.execute(
+            """INSERT INTO product_image_cache
+               (cache_key, image_source, image_data, mime_type, byte_size,
+                created_on, last_accessed_on)
+               VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+               ON CONFLICT(cache_key, image_source) DO UPDATE SET
+                   image_data=excluded.image_data,
+                   mime_type=excluded.mime_type,
+                   byte_size=excluded.byte_size,
+                   last_accessed_on=excluded.last_accessed_on""",
+            (cache_key, image_source, image_data, mime_type, len(image_data)),
+        )
+        _evict_product_image_cache(con)
+
+
+def load_product_image_cache(cache_key: str) -> dict[str, bytes]:
+    """Load cached images for one product and mark them recently used."""
+
+    with closing(sqlite3.connect(DB_PATH)) as con, con:
+        rows = con.execute(
+            """SELECT image_source, image_data
+               FROM product_image_cache
+               WHERE cache_key=?""",
+            (cache_key,),
+        ).fetchall()
+        if rows:
+            con.execute(
+                """UPDATE product_image_cache
+                   SET last_accessed_on=datetime('now')
+                   WHERE cache_key=?""",
+                (cache_key,),
+            )
+    return {
+        image_source: image_data
+        for image_source, image_data in rows
+        if image_source in {"open_food_facts", "ai"} and isinstance(image_data, bytes)
+    }
+
+
+def get_product_image_cache_stats() -> tuple[int, int]:
+    with closing(sqlite3.connect(DB_PATH)) as con:
+        count, total_bytes = con.execute(
+            "SELECT COUNT(*), COALESCE(SUM(byte_size), 0) FROM product_image_cache"
+        ).fetchone()
+    return int(count), int(total_bytes)
 
 
 # ---------------------------------------------------------------------------

@@ -252,7 +252,12 @@ def build_home_shell(
                     content=ft.Column(
                         spacing=10,
                         controls=[
-                            ft.Text("Scan Food. Understand Freshness.", size=28 if metrics["is_desktop"] else 22, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "Scan Food. Understand Freshness.",
+                                size=28 if metrics["is_desktop"] else 22,
+                                weight=ft.FontWeight.BOLD,
+                                color=ThemeColors.TEXT_PRIMARY,
+                            ),
                             ft.Text(
                                 "Collaborate, Donate and Reduce Waste\nTogether!",
                                 size=15,
@@ -330,7 +335,12 @@ def build_home_shell(
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
-                        ft.Text("Goal Tracker", size=16, weight=ft.FontWeight.BOLD),
+                        ft.Text(
+                            "Goal Tracker",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                            color=ThemeColors.TEXT_PRIMARY,
+                        ),
                         ft.Container(
                             bgcolor="#F6F7F9",
                             border_radius=8,
@@ -424,7 +434,12 @@ def build_home_shell(
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
-                        ft.Text("Recently Scanned", size=16, weight=ft.FontWeight.BOLD),
+                        ft.Text(
+                            "Recently Scanned",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                            color=ThemeColors.TEXT_PRIMARY,
+                        ),
                         ft.Text(f"{len(recent_items)} items", size=11, color=ThemeColors.TEXT_SECONDARY),
                     ],
                 ),
@@ -477,7 +492,12 @@ def build_home_shell(
                         spacing=2,
                         controls=[
                             ft.Text("PantryIQ Connect", size=44 if metrics["is_desktop"] else 34, weight=ft.FontWeight.BOLD, color=ThemeColors.GREEN_TEXT),
-                            ft.Text(f"Welcome back, {profile_data.get('name') or 'there'}!", size=20 if metrics["is_desktop"] else 16, weight=ft.FontWeight.W_600),
+                            ft.Text(
+                                f"Welcome back, {profile_data.get('name') or 'there'}!",
+                                size=20 if metrics["is_desktop"] else 16,
+                                weight=ft.FontWeight.W_600,
+                                color=ThemeColors.TEXT_PRIMARY,
+                            ),
                             ft.Text(
                                 "Here's what's happening with your pantry and community impact.",
                                 size=12,

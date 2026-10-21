@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock, Mock, patch
 import flet as ft
 import numpy as np
 
-from pages.barcode_page import BarcodeScannerController, get_camera_preview_dimensions
+from pages.barcode_page import (
+    CAMERA_LANDSCAPE_ASPECT_RATIO,
+    CAMERA_PORTRAIT_ASPECT_RATIO,
+    BarcodeScannerController,
+    get_camera_preview_aspect_ratio,
+    get_camera_preview_dimensions,
+)
 
 
 class _TestScannerController(BarcodeScannerController):
@@ -172,8 +178,31 @@ class BarcodeScannerImageTests(unittest.TestCase):
             {"shell_width": 1000, "shell_height": 700, "is_desktop": True}
         )
 
-        self.assertEqual(mobile_size, (358, 268))
+        self.assertEqual(mobile_size, (358, 477))
         self.assertEqual(desktop_size, (533, 400))
+
+    def test_phone_portrait_uses_taller_camera_preview(self):
+        portrait_metrics = {
+            "shell_width": 390,
+            "shell_height": 760,
+            "is_desktop": False,
+            "is_tablet": False,
+        }
+        landscape_metrics = {
+            "shell_width": 760,
+            "shell_height": 390,
+            "is_desktop": False,
+            "is_tablet": True,
+        }
+
+        self.assertEqual(
+            get_camera_preview_aspect_ratio(portrait_metrics),
+            CAMERA_PORTRAIT_ASPECT_RATIO,
+        )
+        self.assertEqual(
+            get_camera_preview_aspect_ratio(landscape_metrics),
+            CAMERA_LANDSCAPE_ASPECT_RATIO,
+        )
 
     def test_preview_shrinks_to_keep_camera_buttons_visible(self):
         preview_size = get_camera_preview_dimensions(
