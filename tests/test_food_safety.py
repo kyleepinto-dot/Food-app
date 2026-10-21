@@ -45,6 +45,11 @@ from pages.product_cache import (
     store_product,
 )
 from pages.ai_food_profile_service import get_ai_food_profile_service_signature
+from pages.pantry_page import (
+    DEFAULT_BEST_BY_DAYS,
+    _suggested_best_by,
+    scanned_product_draft,
+)
 
 
 class FoodSafetyTests(unittest.TestCase):
@@ -193,6 +198,45 @@ class FoodSafetyTests(unittest.TestCase):
         self.assertEqual(restored["_cached_off_image_data"], b"off-image")
         self.assertEqual(restored["_cached_ai_image_data"], b"ai-image")
         self.assertEqual(load_ai_profile(restored), expected_profile)
+
+    def test_scanned_produce_uses_fresh_shelf_life_for_best_by(self):
+        product = {
+            "product_name": "Fresh strawberries",
+            "categories": "Fresh produce",
+            "ai_food_profile": {
+                "shelf_life_days": {"fresh": 4, "unopened": None, "opened": None},
+                "storage": "Fresh produce: refrigerate and keep dry.",
+            },
+        }
+
+        draft = scanned_product_draft(product)
+
+        self.assertEqual(draft["safety_class"], "fresh_produce")
+        self.assertEqual(
+            draft["best_by"],
+            (date.today() + timedelta(days=4)).isoformat(),
+        )
+
+    def test_best_by_suggestion_matches_food_state_and_uses_default_when_missing(self):
+        shelf_life_days = {"fresh": 4, "unopened": 20, "opened": 6}
+        today = date(2026, 10, 20)
+
+        self.assertEqual(
+            _suggested_best_by(shelf_life_days, "fresh_produce", today=today),
+            "2026-10-24",
+        )
+        self.assertEqual(
+            _suggested_best_by(shelf_life_days, "sealed_packaged", today=today),
+            "2026-11-09",
+        )
+        self.assertEqual(
+            _suggested_best_by(shelf_life_days, "homemade_or_opened", today=today),
+            "2026-10-26",
+        )
+        self.assertEqual(
+            _suggested_best_by({}, "sealed_packaged", today=today),
+            (today + timedelta(days=DEFAULT_BEST_BY_DAYS)).isoformat(),
+        )
 
     def test_changed_ai_service_signature_clears_only_cached_profiles(self):
         product = {

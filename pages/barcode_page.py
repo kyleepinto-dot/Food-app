@@ -103,7 +103,9 @@ class BarcodeScannerController:
         self.on_product_name_detected: Callable[[str], Awaitable[bool]] | None = None
         self.last_failed_barcode: str | None = None
         self.lookup_in_progress = False
+        self.active_lookup_token: object | None = None
         self.capture_in_progress = False
+        self.stream_frame_in_progress = False
         self.camera_light_on = False
         self.last_barcode_width_ratio: float | None = None
         self.last_barcode_sharpness: float | None = None
@@ -130,7 +132,9 @@ class BarcodeScannerController:
         self.streaming_supported = False
         self.last_failed_barcode = None
         self.lookup_in_progress = False
+        self.active_lookup_token = None
         self.capture_in_progress = False
+        self.stream_frame_in_progress = False
         self.camera_light_on = False
         self.append_debug("bind_controls", "Scan controls bound successfully")
 
@@ -209,12 +213,7 @@ class BarcodeScannerController:
 
         # Ignore duplicate failed barcodes until the user scans a different code.
         if barcode_value == self.last_failed_barcode:
-            self.append_debug("handle_decoded_barcode", "Barcode matches last failed value; prompting rescan")
-            if self.status_text is not None:
-                self.status_text.value = "Please scan a different barcode"
-            if self.result_text is not None:
-                self.result_text.value = "This barcode is not a food item in Open Food Facts. Scan again."
-            self.page.update()
+            self.append_debug("handle_decoded_barcode", "Barcode matches last failed value; ignoring repeated frame")
             return
 
         if self.on_barcode_detected is None:
@@ -228,6 +227,9 @@ class BarcodeScannerController:
             self.append_debug("handle_decoded_barcode", "Lookup already in progress; skipping duplicate request")
             return
 
+        lookup_generation = self.camera_generation
+        lookup_token = object()
+        self.active_lookup_token = lookup_token
         self.lookup_in_progress = True
         if self.lookup_overlay is not None:
             self.lookup_overlay.visible = True
@@ -240,6 +242,12 @@ class BarcodeScannerController:
 
         try:
             is_food = await self.on_barcode_detected(barcode_value)
+            if (
+                lookup_generation != self.camera_generation
+                or self.active_lookup_token is not lookup_token
+            ):
+                self.append_debug("open_food_facts_lookup", "Discarding stale lookup result")
+                return
             self.append_debug("open_food_facts_lookup", f"Lookup completed; is_food={is_food}")
             if is_food:
                 self.last_failed_barcode = None
@@ -259,11 +267,13 @@ class BarcodeScannerController:
                 self.result_text.value = f"Could not verify barcode ({exc}). Please scan again."
             self.page.update()
         finally:
-            self.lookup_in_progress = False
-            lookup_overlay = self.lookup_overlay
-            if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
-                lookup_overlay.visible = False
-                self.page.update()
+            if self.active_lookup_token is lookup_token:
+                self.active_lookup_token = None
+                self.lookup_in_progress = False
+                lookup_overlay = self.lookup_overlay
+                if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
+                    lookup_overlay.visible = False
+                    self.page.update()
             self.append_debug("open_food_facts_lookup", "Lookup request finished")
 
     async def search_manual_barcode(self, e):
@@ -314,6 +324,9 @@ class BarcodeScannerController:
             self.append_debug("manual_entry", "Lookup already in progress; skipping duplicate request")
             return
 
+        lookup_generation = self.camera_generation
+        lookup_token = object()
+        self.active_lookup_token = lookup_token
         self.lookup_in_progress = True
         if self.lookup_overlay is not None:
             self.lookup_overlay.visible = True
@@ -325,6 +338,12 @@ class BarcodeScannerController:
 
         try:
             is_food = await self.on_product_name_detected(product_query)
+            if (
+                lookup_generation != self.camera_generation
+                or self.active_lookup_token is not lookup_token
+            ):
+                self.append_debug("manual_name_lookup", "Discarding stale lookup result")
+                return
             if not is_food:
                 if self.status_text is not None:
                     self.status_text.value = "No matching food found"
@@ -339,11 +358,13 @@ class BarcodeScannerController:
                 self.result_text.value = f"Could not search product name ({exc})."
             self.page.update()
         finally:
-            self.lookup_in_progress = False
-            lookup_overlay = self.lookup_overlay
-            if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
-                lookup_overlay.visible = False
-                self.page.update()
+            if self.active_lookup_token is lookup_token:
+                self.active_lookup_token = None
+                self.lookup_in_progress = False
+                lookup_overlay = self.lookup_overlay
+                if lookup_overlay is not None and self._control_is_mounted(lookup_overlay):
+                    lookup_overlay.visible = False
+                    self.page.update()
 
     def camera_supported_on_platform(self) -> bool:
         # In browser builds, the camera widget can be used directly.
@@ -779,36 +800,49 @@ class BarcodeScannerController:
 
     async def process_stream_frame(self, e):
         # Called for each streaming frame when live image stream is active.
+        if (
+            not self.running
+            or not self.streaming_supported
+            or self.lookup_in_progress
+            or self.stream_frame_in_progress
+        ):
+            return
+
         image_bytes = e.bytes
         if not image_bytes:
             return
 
+        generation = self.camera_generation
+        self.stream_frame_in_progress = True
         try:
-            # Convert raw bytes into an OpenCV BGR frame.
-            nparr = np.frombuffer(image_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception:
-            # Ignore malformed frames and keep the stream alive.
-            self.append_debug("stream_decode", "Failed to decode stream frame bytes")
-            return
+            try:
+                # Convert raw bytes into an OpenCV BGR frame.
+                nparr = np.frombuffer(image_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception:
+                # Ignore malformed frames and keep the stream alive.
+                self.append_debug("stream_decode", "Failed to decode stream frame bytes")
+                return
 
-        if frame is None:
-            return
+            if frame is None:
+                return
 
-        barcodes = await self.decode_scan_window(frame)
+            barcodes = await self.decode_scan_window(frame)
+            if (
+                generation != self.camera_generation
+                or not self.running
+                or self.lookup_in_progress
+            ):
+                return
 
-        if self.result_text is None:
-            return
-
-        if barcodes:
-            barcode = barcodes[0]
-            barcode_value = self.decoded_barcode_value(barcode)
-            self.append_debug("stream_decode", f"Barcode decoded from stream: {barcode_value}")
-            await self.handle_decoded_barcode(barcode_value)
-        else:
-            self.result_text.value = "No barcode scanned yet"
-
-        self.page.update()
+            if barcodes:
+                barcode = barcodes[0]
+                barcode_value = self.decoded_barcode_value(barcode)
+                self.append_debug("stream_decode", f"Barcode decoded from stream: {barcode_value}")
+                await self.handle_decoded_barcode(barcode_value)
+        finally:
+            if generation == self.camera_generation:
+                self.stream_frame_in_progress = False
 
     async def capture_photo_and_scan(self, e):
         # The photo handler is shared by the capture button and camera-preview
@@ -1071,7 +1105,10 @@ class BarcodeScannerController:
         self.camera_generation += 1
         self.camera_starting = False
         self.running = False
+        self.lookup_in_progress = False
+        self.active_lookup_token = None
         self.capture_in_progress = False
+        self.stream_frame_in_progress = False
         self.camera_light_on = False
         self.set_camera_action_state(False)
         self.append_debug("stop_camera", "Stop requested")

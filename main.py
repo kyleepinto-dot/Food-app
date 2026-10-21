@@ -866,6 +866,7 @@ def main(page: ft.Page):
             render_current_view()
 
     async def on_barcode_detected(barcode: str) -> bool:
+        lookup_generation = scanner_controller.camera_generation
         product = None
         try:
             product = load_product(barcode)
@@ -894,6 +895,16 @@ def main(page: ft.Page):
                     )
         if product is None:
             scanner_controller.append_debug("open_food_facts_lookup", "No food product returned from service")
+            return False
+        if (
+            lookup_generation != scanner_controller.camera_generation
+            or view_state.get("current") != "scan"
+            or not scanner_controller.lookup_in_progress
+        ):
+            scanner_controller.append_debug(
+                "open_food_facts_lookup",
+                "Lookup result ignored because scanning was stopped or the view changed",
+            )
             return False
 
         try:
@@ -925,6 +936,7 @@ def main(page: ft.Page):
 
     async def on_product_name_detected(product_name_query: str) -> bool:
         # Search Open Food Facts by typed product name when barcode is unknown.
+        lookup_generation = scanner_controller.camera_generation
         scanner_controller.append_debug("open_food_facts_name_lookup", f"Searching product for '{product_name_query}'")
         product = await asyncio.to_thread(fetch_food_product_by_name, product_name_query)
         if product is None:
@@ -937,6 +949,16 @@ def main(page: ft.Page):
                 "product_cache_error",
                 f"Could not persist product name result: {type(exc).__name__}: {exc}",
             )
+        if (
+            lookup_generation != scanner_controller.camera_generation
+            or view_state.get("current") != "scan"
+            or not scanner_controller.lookup_in_progress
+        ):
+            scanner_controller.append_debug(
+                "open_food_facts_name_lookup",
+                "Lookup result ignored because scanning was stopped or the view changed",
+            )
+            return False
 
         try:
             scanner_controller.append_debug("navigation", "Switching from scan view to product view (manual name)")

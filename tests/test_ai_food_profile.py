@@ -1,9 +1,13 @@
 import json
 import unittest
+from datetime import date, timedelta
+from typing import Callable, cast
+from unittest.mock import patch
 
 import flet as ft
 
 from pages.ai_food_profile_service import _build_local_profile, _parse_profile_response
+from pages.pantry_page import build_add_pantry_shell
 from pages.product_info_page import _product_title_size, build_product_info_shell
 from pages.theme import ThemeColors
 
@@ -73,6 +77,7 @@ class AiFoodProfileTests(unittest.TestCase):
             "risk": "Medium Risk",
             "confidence": "High Confidence",
             "shelf_life": "Unopened: follow package date. After opening: use within 3-7 days.",
+            "shelf_life_days": {"fresh": None, "unopened": None, "opened": 3},
             "storage": "Before opening: keep cool. After opening: refrigerate and reseal.",
             "immediate_actions": "If unopened, check the date. After opening, mark the open date.",
             "warnings": "Discard if spoiled.",
@@ -85,6 +90,28 @@ class AiFoodProfileTests(unittest.TestCase):
         assert parsed is not None
         self.assertIn("After opening", parsed["shelf_life"])
         self.assertIn("After opening", parsed["storage"])
+        self.assertEqual(
+            parsed["shelf_life_days"],
+            {"fresh": None, "unopened": None, "opened": 3},
+        )
+
+    def test_parser_accepts_fresh_produce_shelf_life(self):
+        payload = {
+            "risk": "Medium Risk",
+            "confidence": "High Confidence",
+            "shelf_life": "Fresh produce: use within 4-7 days.",
+            "shelf_life_days": {"fresh": 4, "unopened": None, "opened": None},
+            "storage": "Fresh produce: refrigerate and keep dry.",
+            "immediate_actions": "Fresh produce: sort and use ripe pieces first.",
+            "warnings": "Discard moldy or slimy pieces.",
+            "fattom": {},
+        }
+
+        parsed = _parse_profile_response(json.dumps(payload))
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed["shelf_life_days"]["fresh"], 4)
 
     def test_local_profiles_always_identify_package_state(self):
         examples = [
@@ -104,9 +131,70 @@ class AiFoodProfileTests(unittest.TestCase):
                 self.assertTrue(
                     any(
                         marker in combined
-                        for marker in ("unopened", "before opening", "after opening", "opening not applicable")
+                        for marker in (
+                            "unopened",
+                            "before opening",
+                            "after opening",
+                            "opening not applicable",
+                            "fresh produce",
+                        )
                     )
                 )
+                shelf_life_days = profile["shelf_life_days"]
+                self.assertTrue(any(days is not None for days in shelf_life_days.values()))
+
+    def test_food_type_updates_suggested_date_until_user_overrides_it(self):
+        shell = build_add_pantry_shell(
+            metrics={
+                "is_desktop": False,
+                "is_tablet": False,
+                "shell_width": 390,
+                "shell_height": 760,
+            },
+            draft={
+                "name": "Test food",
+                "best_by": (date.today() + timedelta(days=20)).isoformat(),
+                "quantity": 1,
+                "unit": "items",
+                "location": "Shelf",
+                "safety_class": "sealed_packaged",
+                "shelf_life_days": {"fresh": 4, "unopened": 20, "opened": 6},
+            },
+            on_save=lambda _: None,
+            on_cancel=lambda _: None,
+            on_home_click=lambda _: None,
+            on_scan_click=lambda _: None,
+            on_me_click=lambda _: None,
+        )
+        fields = _controls_of_type(shell, ft.TextField)
+        dropdowns = _controls_of_type(shell, ft.Dropdown)
+        best_by = next(
+            field
+            for field in fields
+            if isinstance(field, ft.TextField) and field.label == "Best-by date (MM-DD-YYYY)"
+        )
+        safety = next(
+            dropdown
+            for dropdown in dropdowns
+            if isinstance(dropdown, ft.Dropdown) and dropdown.label == "Food type"
+        )
+        assert safety.on_select is not None
+        assert best_by.on_change is not None
+
+        safety.value = "homemade_or_opened"
+        with patch.object(best_by, "update"):
+            cast(Callable[[], None], safety.on_select)()
+        self.assertEqual(
+            best_by.value,
+            (date.today() + timedelta(days=6)).strftime("%m-%d-%Y"),
+        )
+
+        best_by.value = "12-31-2099"
+        cast(Callable[[], None], best_by.on_change)()
+        safety.value = "fresh_produce"
+        with patch.object(best_by, "update"):
+            cast(Callable[[], None], safety.on_select)()
+        self.assertEqual(best_by.value, "12-31-2099")
 
     def test_waste_reduction_is_immediately_before_fattom(self):
         product = {

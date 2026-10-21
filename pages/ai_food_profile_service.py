@@ -64,6 +64,26 @@ def _clean_text(value: object, default: str) -> str:
     return text if text else default
 
 
+def _normalize_shelf_life_days(value: object) -> dict[str, int | None]:
+    payload = value if isinstance(value, dict) else {}
+    normalized: dict[str, int | None] = {}
+    for state in ("fresh", "unopened", "opened"):
+        raw_value = payload.get(state)
+        if isinstance(raw_value, bool):
+            normalized[state] = None
+            continue
+        if not isinstance(raw_value, (int, float, str)):
+            normalized[state] = None
+            continue
+        try:
+            numeric_value = float(raw_value)
+        except (TypeError, ValueError):
+            normalized[state] = None
+            continue
+        normalized[state] = round(numeric_value) if numeric_value >= 1 else None
+    return normalized
+
+
 def _set_last_error(message: str) -> None:
     global _LAST_PROFILE_ERROR
     _LAST_PROFILE_ERROR = message
@@ -200,6 +220,7 @@ def _has_package_state_context(value: str) -> bool:
             "after opening",
             "once opened",
             "opening not applicable",
+            "fresh produce",
             "after preparation",
             "after cooking",
         )
@@ -253,6 +274,7 @@ def _parse_profile_response(raw_text: str) -> dict | None:
         "risk": risk,
         "confidence": confidence,
         "shelf_life": shelf_life,
+        "shelf_life_days": _normalize_shelf_life_days(payload.get("shelf_life_days")),
         "storage": storage,
         "immediate_actions": immediate_actions,
         "warnings": warnings,
@@ -270,6 +292,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
             "risk": "High Risk",
             "confidence": "High Confidence",
             "shelf_life": "Unopened: follow the package date. After opening: use within 3-7 days.",
+            "shelf_life_days": {"fresh": None, "unopened": None, "opened": 3},
             "storage": "Unopened and after opening: keep refrigerated at 1-4C; reseal tightly after opening.",
             "immediate_actions": "If unopened, refrigerate promptly. After opening, mark the date and use that container first.",
             "warnings": "Discard if sour smell, curdling, gas buildup, or visible mold appears.",
@@ -288,6 +311,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
             "risk": "High Risk",
             "confidence": "High Confidence",
             "shelf_life": "Unopened or after opening: use within 1-3 refrigerated days, or freeze sooner.",
+            "shelf_life_days": {"fresh": None, "unopened": 1, "opened": 1},
             "storage": "Unopened and after opening: store in the coldest refrigerator zone; keep wrapped and cook or freeze promptly.",
             "immediate_actions": "If unopened, keep sealed until use. After opening, portion immediately and freeze what will not be cooked soon.",
             "warnings": "Discard if off-odor, slimy texture, color change, or package swelling is present.",
@@ -306,6 +330,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
             "risk": "Low Risk",
             "confidence": "Medium Confidence",
             "shelf_life": "Unopened: follow the package date. After opening: use within 1-3 months for best quality.",
+            "shelf_life_days": {"fresh": None, "unopened": None, "opened": 30},
             "storage": "Unopened and after opening: keep continuously frozen; reseal opened packaging and avoid thaw-refreeze cycles.",
             "immediate_actions": "If unopened, leave sealed until needed. After opening, remove one portion and return the package promptly to the freezer.",
             "warnings": "Discard if thawed for extended time, freezer-burned with off odor, or damaged packaging is found.",
@@ -324,6 +349,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
             "risk": "Medium Risk",
             "confidence": "Medium Confidence",
             "shelf_life": "Unopened: follow the package date. After opening: use within 2-5 days or freeze.",
+            "shelf_life_days": {"fresh": None, "unopened": None, "opened": 2},
             "storage": "Before opening: follow the label. After opening: reseal at room temperature and freeze extra portions early.",
             "immediate_actions": "If unopened, keep the package sealed. After opening, set aside a freezer portion and use room-temperature stock first.",
             "warnings": "Discard if mold spots, fermented odor, or unusual stickiness develops.",
@@ -342,6 +368,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
             "risk": "Low Risk",
             "confidence": "Medium Confidence",
             "shelf_life": "Unopened: follow the package date. After opening: use within 2-6 months for best quality.",
+            "shelf_life_days": {"fresh": None, "unopened": None, "opened": 60},
             "storage": "Before opening: keep in a cool, dry cabinet. After opening: seal airtight and protect from humidity, heat, and sunlight.",
             "immediate_actions": "If unopened, leave sealed. After opening, transfer to an airtight container if the original package does not reseal.",
             "warnings": "Discard if pests, rancid odor, visible moisture damage, or clumping from spoilage is present.",
@@ -359,9 +386,10 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         return {
             "risk": "Medium Risk",
             "confidence": "Medium Confidence",
-            "shelf_life": "Opening not applicable: use fresh produce within approximately 3-10 days.",
-            "storage": "Opening not applicable: keep produce dry and refrigerate when appropriate; use ripe items first.",
-            "immediate_actions": "Opening not applicable: sort produce today and prepare or freeze extra ripe pieces before quality drops.",
+            "shelf_life": "Fresh produce: use within approximately 3-10 days.",
+            "shelf_life_days": {"fresh": 3, "unopened": None, "opened": None},
+            "storage": "Fresh produce: keep dry and refrigerate when appropriate; use ripe items first.",
+            "immediate_actions": "Fresh produce: sort it today and prepare or freeze extra ripe pieces before quality drops.",
             "warnings": "Discard pieces with mold spread, fermented odor, or slimy breakdown.",
             "fattom": {
                 "food": "Medium",
@@ -378,6 +406,7 @@ def _build_local_profile(product_name: str, categories: str) -> dict:
         "risk": "Medium Risk",
         "confidence": "Low Confidence",
         "shelf_life": "Unopened: follow the printed package date. After opening: check the label; if absent, use within 5-10 days.",
+        "shelf_life_days": {"fresh": None, "unopened": None, "opened": 5},
         "storage": "Before opening: follow label storage instructions. After opening: refrigerate if required and keep tightly sealed.",
         "immediate_actions": "If unopened, check the package date. After opening, mark the open date and move the product to its labeled storage location.",
         "warnings": "Discard if package is swollen, leaking, moldy, or has unusual odor/texture.",
@@ -407,14 +436,17 @@ def fetch_ai_food_profile(product_name: str, categories: str) -> dict | None:
     prompts = [
         (
             "You are a food safety assistant. Return ONLY minified JSON with keys "
-            "risk,confidence,shelf_life,storage,immediate_actions,warnings,fattom. "
+            "risk,confidence,shelf_life,shelf_life_days,storage,immediate_actions,warnings,fattom. "
             "risk must be High Risk, Medium Risk, or Low Risk. "
             "confidence must be High Confidence, Medium Confidence, or Low Confidence. "
             "shelf_life must explicitly distinguish 'Unopened:' from 'After opening:'; "
-            "for unpackaged foods use 'Opening not applicable:'. Never give an unlabeled duration. "
+            "for unpackaged fresh produce use 'Fresh produce:'. Never give an unlabeled duration. "
+            "shelf_life_days must be an object with keys fresh,unopened,opened. "
+            "Each value must be a conservative positive whole number of days or null when that state does not apply "
+            "or no reliable duration is available. Use the lower end of a duration range. "
             "storage must explicitly distinguish 'Before opening:' from 'After opening:'; "
-            "for unpackaged foods use 'Opening not applicable:'. "
-            "immediate_actions must clearly say what to do if unopened and what to do after opening. "
+            "for unpackaged fresh produce use 'Fresh produce:'. "
+            "immediate_actions must clearly address unopened and opened states, or fresh produce when unpackaged. "
             "warnings must be one concise food-safety warning sentence. "
             "fattom must be an object with keys food,acidity,time,temperature,oxygen,moisture. "
             "Each fattom value must be exactly one of Low, Medium, High. "

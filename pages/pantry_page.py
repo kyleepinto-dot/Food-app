@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
@@ -124,35 +123,70 @@ def discard_pantry_item(item_id: int) -> None:
         con.execute("UPDATE pantry_items SET status='composted' WHERE id=?", (item_id,))
 
 
-def _duration_days(value: str) -> int:
-    text = str(value or "").lower()
-    match = re.search(r"(\d+(?:\.\d+)?)", text)
-    if not match:
-        return DEFAULT_BEST_BY_DAYS
-    amount = float(match.group(1))
-    if "month" in text:
-        amount *= 30
-    elif "week" in text:
-        amount *= 7
-    elif "year" in text:
-        amount *= 365
-    return max(1, round(amount))
+SHELF_LIFE_STATE_BY_SAFETY = {
+    "fresh_produce": "fresh",
+    "sealed_packaged": "unopened",
+    "homemade_or_opened": "opened",
+}
+
+
+def _normalize_shelf_life_days(value: object) -> dict[str, int | None]:
+    payload = value if isinstance(value, dict) else {}
+    normalized: dict[str, int | None] = {}
+    for state in ("fresh", "unopened", "opened"):
+        raw_value = payload.get(state)
+        if isinstance(raw_value, bool):
+            normalized[state] = None
+            continue
+        if not isinstance(raw_value, (int, str)):
+            normalized[state] = None
+            continue
+        try:
+            days = int(raw_value)
+        except (TypeError, ValueError):
+            normalized[state] = None
+            continue
+        normalized[state] = days if days > 0 else None
+    return normalized
+
+
+def _suggested_best_by(
+    shelf_life_days: object,
+    safety_class: str,
+    *,
+    today: date | None = None,
+) -> str:
+    normalized = _normalize_shelf_life_days(shelf_life_days)
+    state = SHELF_LIFE_STATE_BY_SAFETY.get(safety_class, "unopened")
+    days = normalized.get(state) or DEFAULT_BEST_BY_DAYS
+    return ((today or date.today()) + timedelta(days=days)).isoformat()
 
 
 def scanned_product_draft(product: dict, quantity: int = 1, source_key: str = "") -> dict:
     """Translate scan/OFF metadata into the editable Shared Pantry form."""
-    profile = product.get("ai_food_profile") if isinstance(product.get("ai_food_profile"), dict) else {}
+    profile_value = product.get("ai_food_profile")
+    profile = profile_value if isinstance(profile_value, dict) else {}
     text = f"{product.get('product_name', '')} {product.get('categories', '')}".lower()
     produce_words = ("fruit", "vegetable", "produce", "salad", "apple", "banana", "tomato")
-    safety = "fresh_produce" if any(word in text for word in produce_words) else "sealed_packaged"
+    shelf_life_days = _normalize_shelf_life_days(profile.get("shelf_life_days"))
+    has_fresh_shelf_life = (
+        shelf_life_days["fresh"] is not None
+        and shelf_life_days["unopened"] is None
+        and shelf_life_days["opened"] is None
+    )
+    safety = (
+        "fresh_produce"
+        if has_fresh_shelf_life or any(word in text for word in produce_words)
+        else "sealed_packaged"
+    )
     storage = str(profile.get("storage") or "").lower()
     location = "Freezer" if "freez" in storage else "Fridge" if "refriger" in storage or "fridge" in storage else "Shelf"
     return {
         "name": str(product.get("product_name") or product.get("generic_name") or "Unknown product").strip(),
-        "best_by": (date.today() + timedelta(days=_duration_days(str(profile.get("shelf_life") or "")))).isoformat(),
+        "best_by": _suggested_best_by(shelf_life_days, safety),
         "quantity": max(1, int(quantity)), "unit": "items", "location": location,
         "notes": "", "safety_class": safety, "added_via_scan": True,
-        "source_key": source_key,
+        "source_key": source_key, "shelf_life_days": shelf_life_days,
     }
 
 
@@ -358,13 +392,30 @@ def build_add_pantry_shell(metrics: dict, draft: dict, on_save, on_cancel, on_ho
     safety = ft.Dropdown(value=str(draft.get("safety_class") or "sealed_packaged"), label="Food type", options=[ft.dropdown.Option(key=k, text=v) for k, v in FOOD_TYPES], border_radius=12, expand=True)
     notes = ft.TextField(value=str(draft.get("notes") or ""), label="Note for the family", multiline=True, min_lines=2, max_lines=3, border_radius=12)
 
+    best_by_overridden = False
+
+    def _mark_best_by_overridden(_=None):
+        nonlocal best_by_overridden
+        best_by_overridden = True
+
     def _reformat_best_by(_=None):
         parsed = dates.parse_mdy(best_by.value)
         if parsed:
             best_by.value = parsed.strftime("%m-%d-%Y")
             best_by.error_text = None
             best_by.update()
+    best_by.on_change = _mark_best_by_overridden
     best_by.on_blur = _reformat_best_by
+
+    def _update_suggested_best_by(_=None):
+        if best_by_overridden:
+            return
+        best_by.value = dates.iso_to_mdy(
+            _suggested_best_by(draft.get("shelf_life_days"), str(safety.value or "sealed_packaged"))
+        )
+        best_by.update()
+
+    safety.on_select = _update_suggested_best_by
 
     err = ft.Text("", color="#B5402C", size=13, weight=ft.FontWeight.BOLD, visible=False)
 

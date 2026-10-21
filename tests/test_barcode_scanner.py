@@ -8,6 +8,7 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import flet as ft
+import cv2
 import numpy as np
 
 from pages.barcode_page import (
@@ -28,6 +29,109 @@ class _TestScannerController(BarcodeScannerController):
 
 
 class BarcodeScannerImageTests(unittest.TestCase):
+    @staticmethod
+    def _live_stream_controller() -> BarcodeScannerController:
+        controller = BarcodeScannerController.__new__(BarcodeScannerController)
+        controller.running = True
+        controller.streaming_supported = True
+        controller.lookup_in_progress = False
+        controller.active_lookup_token = None
+        controller.last_failed_barcode = None
+        controller.stream_frame_in_progress = False
+        controller.camera_generation = 1
+        controller.result_text = SimpleNamespace(value="Live barcode scanning is active")
+        controller.page = cast(ft.Page, SimpleNamespace(update=Mock()))
+        controller.append_debug = Mock()
+        controller.decode_scan_window = AsyncMock(return_value=[])
+        controller.handle_decoded_barcode = AsyncMock()
+        return controller
+
+    def test_live_stream_skips_processing_during_product_lookup(self):
+        controller = self._live_stream_controller()
+        controller.lookup_in_progress = True
+        event = SimpleNamespace(bytes=b"encoded-frame")
+
+        asyncio.run(controller.process_stream_frame(event))
+
+        cast(AsyncMock, controller.decode_scan_window).assert_not_awaited()
+        cast(AsyncMock, controller.handle_decoded_barcode).assert_not_awaited()
+
+    def test_live_stream_allows_only_one_frame_decode_at_a_time(self):
+        controller = self._live_stream_controller()
+        controller.stream_frame_in_progress = True
+        event = SimpleNamespace(bytes=b"encoded-frame")
+
+        asyncio.run(controller.process_stream_frame(event))
+
+        cast(AsyncMock, controller.decode_scan_window).assert_not_awaited()
+
+    def test_live_stream_drops_result_if_lookup_starts_during_decode(self):
+        controller = self._live_stream_controller()
+        event = SimpleNamespace(bytes=b"encoded-frame")
+
+        async def begin_lookup(_frame):
+            controller.lookup_in_progress = True
+            return [SimpleNamespace(data=b"0898999000022")]
+
+        controller.decode_scan_window = AsyncMock(side_effect=begin_lookup)
+        encoded_frame = np.full((20, 20, 3), 255, dtype=np.uint8)
+        saved, encoded = cv2.imencode(".jpg", encoded_frame)
+        self.assertTrue(saved)
+        event.bytes = encoded.tobytes()
+
+        asyncio.run(controller.process_stream_frame(event))
+
+        cast(AsyncMock, controller.handle_decoded_barcode).assert_not_awaited()
+        self.assertFalse(controller.stream_frame_in_progress)
+
+    def test_live_stream_miss_does_not_overwrite_status_or_update_page(self):
+        controller = self._live_stream_controller()
+        encoded_frame = np.full((20, 20, 3), 255, dtype=np.uint8)
+        saved, encoded = cv2.imencode(".jpg", encoded_frame)
+        self.assertTrue(saved)
+
+        asyncio.run(controller.process_stream_frame(SimpleNamespace(bytes=encoded.tobytes())))
+
+        assert controller.result_text is not None
+        self.assertEqual(controller.result_text.value, "Live barcode scanning is active")
+        cast(Mock, controller.page.update).assert_not_called()
+
+    def test_live_stream_releases_frame_gate_after_malformed_image(self):
+        controller = self._live_stream_controller()
+
+        asyncio.run(controller.process_stream_frame(SimpleNamespace(bytes=b"not-an-image")))
+
+        self.assertFalse(controller.stream_frame_in_progress)
+        cast(AsyncMock, controller.handle_decoded_barcode).assert_not_awaited()
+
+    def test_stale_lookup_cannot_clear_new_lookup_state(self):
+        controller = self._live_stream_controller()
+        old_overlay = SimpleNamespace(visible=False)
+        new_overlay = SimpleNamespace(visible=True)
+        controller.lookup_overlay = old_overlay
+        controller.status_text = SimpleNamespace(value="")
+        controller.on_barcode_detected = AsyncMock()
+        controller.handle_decoded_barcode = (
+            BarcodeScannerController.handle_decoded_barcode.__get__(
+                controller,
+                BarcodeScannerController,
+            )
+        )
+
+        async def replace_lookup(_barcode):
+            controller.camera_generation += 1
+            controller.active_lookup_token = object()
+            controller.lookup_in_progress = True
+            controller.lookup_overlay = new_overlay
+            return True
+
+        controller.on_barcode_detected.side_effect = replace_lookup
+
+        asyncio.run(controller.handle_decoded_barcode("0898999000022"))
+
+        self.assertTrue(controller.lookup_in_progress)
+        self.assertTrue(new_overlay.visible)
+
     def test_photo_debug_is_disabled_on_android(self):
         controller = _TestScannerController("android")
 
@@ -265,6 +369,9 @@ class BarcodeScannerImageTests(unittest.TestCase):
         controller.camera_starting = False
         controller.running = True
         controller.capture_in_progress = True
+        controller.lookup_in_progress = False
+        controller.active_lookup_token = None
+        controller.stream_frame_in_progress = True
         controller.camera_light_on = False
         controller.streaming_supported = False
         controller.camera = SimpleNamespace()
@@ -282,6 +389,7 @@ class BarcodeScannerImageTests(unittest.TestCase):
         run_task_mock.assert_not_called()
         self.assertFalse(controller.running)
         self.assertFalse(controller.capture_in_progress)
+        self.assertFalse(controller.stream_frame_in_progress)
 
     def test_release_awaits_camera_calls_while_control_is_mounted(self):
         controller = BarcodeScannerController.__new__(BarcodeScannerController)
@@ -298,6 +406,9 @@ class BarcodeScannerImageTests(unittest.TestCase):
         controller.camera_starting = False
         controller.running = True
         controller.capture_in_progress = False
+        controller.lookup_in_progress = False
+        controller.active_lookup_token = None
+        controller.stream_frame_in_progress = False
         controller.camera_light_on = False
         controller.streaming_supported = False
         controller.camera = camera

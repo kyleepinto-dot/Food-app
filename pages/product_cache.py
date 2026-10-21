@@ -9,7 +9,7 @@ from pages.ai_food_profile_service import get_ai_food_profile_service_signature
 
 PRODUCT_IMAGE_MAX_DIMENSION = 1024
 PRODUCT_IMAGE_JPEG_QUALITIES = (82, 74, 66, 58)
-AI_PROFILE_GUIDANCE_VERSION = 2
+AI_PROFILE_GUIDANCE_VERSION = 3
 
 
 def normalize_barcode(barcode: str) -> str:

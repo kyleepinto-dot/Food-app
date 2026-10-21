@@ -166,6 +166,7 @@ def _derive_food_profile(product: dict) -> dict:
                 "risk": risk,
                 "confidence": confidence,
                 "shelf_life": shelf,
+                "shelf_life_days": ai_profile.get("shelf_life_days"),
                 "storage": storage,
                 "immediate_actions": immediate_actions or "Use oldest stock first and follow package instructions.",
                 "warnings": warnings or "Discard if strong odor, mold, or unusual texture appears.",
@@ -177,22 +178,26 @@ def _derive_food_profile(product: dict) -> dict:
         risk = "High Risk"
         confidence = "High Confidence"
         shelf = "Unopened: follow the package date. After opening: use within 3-7 days."
+        shelf_life_days = {"fresh": None, "unopened": None, "opened": 3}
         storage = "Before opening and after opening: store in the refrigerator between 34-40F (1-4C)."
     elif any(word in text for word in ["potato", "onion", "garlic", "apple", "orange", "banana"]):
         risk = "Medium Risk"
         confidence = "High Confidence"
-        shelf = "Opening not applicable: use within approximately 2-4 weeks."
-        storage = "Opening not applicable: store in a cool, dry place away from direct sunlight."
+        shelf = "Fresh produce: use within approximately 2-4 weeks."
+        shelf_life_days = {"fresh": 14, "unopened": None, "opened": None}
+        storage = "Fresh produce: store in a cool, dry place away from direct sunlight."
     else:
         risk = "Medium Risk"
         confidence = "Medium Confidence"
         shelf = "Unopened: follow the package date. After opening: use within 5-10 days unless the label says otherwise."
+        shelf_life_days = {"fresh": None, "unopened": None, "opened": 5}
         storage = "Before opening: store in a cool place. After opening: refrigerate if required by the label."
 
     return {
         "risk": risk,
         "confidence": confidence,
         "shelf_life": shelf,
+        "shelf_life_days": shelf_life_days,
         "storage": storage,
         "immediate_actions": "If unopened, check the package date. After opening, mark the date and use the opened product first.",
         "warnings": "Discard if strong odor, mold, or unusual texture appears.",
